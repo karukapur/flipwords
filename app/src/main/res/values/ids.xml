@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="overlay_hanzi" type="id" />
+    <item name="overlay_pinyin" type="id" />
+    <item name="overlay_english" type="id" />
+</resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FlipWords</string>
+    <string name="refresh_word">Next word</string>
+    <string name="overlay_channel_name">Chinese word overlay</string>
+    <string name="overlay_start">Start overlay</string>
+    <string name="overlay_stop">Stop overlay</string>
+    <string name="overlay_permission">Grant overlay permission</string>
+</resources>
