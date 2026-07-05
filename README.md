@@ -1,5 +1,9 @@
 # FlipWords
 
+<p align="center">
+  <img src="app/src/main/res/drawable/flipwords_logo.png" alt="FlipWords logo" width="160" />
+</p>
+
 Native Android app for a Samsung Galaxy Z Flip 6 cover screen. It shows one Chinese word with pinyin and English meaning, rotating on a configurable interval that defaults to 90 minutes.
 
 ## What It Builds
