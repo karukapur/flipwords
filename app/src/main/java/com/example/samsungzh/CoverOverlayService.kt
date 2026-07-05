@@ -182,7 +182,7 @@ class CoverOverlayService : Service() {
         root.addView(
             TextView(context).apply {
                 id = R.id.overlay_hanzi
-                setTextColor(context.getColor(R.color.text_primary))
+                setTextColor(overlayPreferences.hanziColor)
                 textSize = overlayPreferences.hanziSizeSp.toFloat()
                 includeFontPadding = false
             },
@@ -191,7 +191,7 @@ class CoverOverlayService : Service() {
         root.addView(
             TextView(context).apply {
                 id = R.id.overlay_pinyin
-                setTextColor(context.getColor(R.color.text_secondary))
+                setTextColor(overlayPreferences.pinyinColor)
                 textSize = overlayPreferences.pinyinSizeSp.toFloat()
                 includeFontPadding = false
             },
@@ -200,7 +200,7 @@ class CoverOverlayService : Service() {
         root.addView(
             TextView(context).apply {
                 id = R.id.overlay_english
-                setTextColor(context.getColor(R.color.accent))
+                setTextColor(overlayPreferences.englishColor)
                 textSize = overlayPreferences.englishSizeSp.toFloat()
                 includeFontPadding = false
             },
@@ -215,7 +215,7 @@ class CoverOverlayService : Service() {
         overlayView?.findViewById<TextView>(R.id.overlay_hanzi)?.text = word.hanzi
         overlayView?.findViewById<TextView>(R.id.overlay_pinyin)?.text = "[${word.pinyin}]"
         overlayView?.findViewById<TextView>(R.id.overlay_english)?.text = word.english
-        applyOverlayTextSizes()
+        applyOverlayTextStyles()
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
     }
 
@@ -225,10 +225,19 @@ class CoverOverlayService : Service() {
         handler.postDelayed(refreshRunnable, delayMillis)
     }
 
-    private fun applyOverlayTextSizes() {
-        overlayView?.findViewById<TextView>(R.id.overlay_hanzi)?.textSize = overlayPreferences.hanziSizeSp.toFloat()
-        overlayView?.findViewById<TextView>(R.id.overlay_pinyin)?.textSize = overlayPreferences.pinyinSizeSp.toFloat()
-        overlayView?.findViewById<TextView>(R.id.overlay_english)?.textSize = overlayPreferences.englishSizeSp.toFloat()
+    private fun applyOverlayTextStyles() {
+        overlayView?.findViewById<TextView>(R.id.overlay_hanzi)?.apply {
+            textSize = overlayPreferences.hanziSizeSp.toFloat()
+            setTextColor(overlayPreferences.hanziColor)
+        }
+        overlayView?.findViewById<TextView>(R.id.overlay_pinyin)?.apply {
+            textSize = overlayPreferences.pinyinSizeSp.toFloat()
+            setTextColor(overlayPreferences.pinyinColor)
+        }
+        overlayView?.findViewById<TextView>(R.id.overlay_english)?.apply {
+            textSize = overlayPreferences.englishSizeSp.toFloat()
+            setTextColor(overlayPreferences.englishColor)
+        }
     }
 
     private fun stopOverlay() {

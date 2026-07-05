@@ -17,6 +17,18 @@ class OverlayPreferences(context: Context) {
         get() = prefs.getInt(KEY_ENGLISH_SIZE, DEFAULT_ENGLISH_SIZE)
         set(value) = prefs.edit().putInt(KEY_ENGLISH_SIZE, value.coerceIn(MIN_ENGLISH_SIZE, MAX_ENGLISH_SIZE)).apply()
 
+    var hanziColor: Int
+        get() = prefs.getInt(KEY_HANZI_COLOR, DEFAULT_HANZI_COLOR)
+        set(value) = prefs.edit().putInt(KEY_HANZI_COLOR, value).apply()
+
+    var pinyinColor: Int
+        get() = prefs.getInt(KEY_PINYIN_COLOR, DEFAULT_PINYIN_COLOR)
+        set(value) = prefs.edit().putInt(KEY_PINYIN_COLOR, value).apply()
+
+    var englishColor: Int
+        get() = prefs.getInt(KEY_ENGLISH_COLOR, DEFAULT_ENGLISH_COLOR)
+        set(value) = prefs.edit().putInt(KEY_ENGLISH_COLOR, value).apply()
+
     var overlayStatus: String
         get() = prefs.getString(KEY_OVERLAY_STATUS, STATUS_IDLE) ?: STATUS_IDLE
         set(value) = prefs.edit().putString(KEY_OVERLAY_STATUS, value).apply()
@@ -39,6 +51,9 @@ class OverlayPreferences(context: Context) {
         private const val KEY_HANZI_SIZE = "hanzi_size_sp"
         private const val KEY_PINYIN_SIZE = "pinyin_size_sp"
         private const val KEY_ENGLISH_SIZE = "english_size_sp"
+        private const val KEY_HANZI_COLOR = "hanzi_color"
+        private const val KEY_PINYIN_COLOR = "pinyin_color"
+        private const val KEY_ENGLISH_COLOR = "english_color"
         private const val KEY_OVERLAY_STATUS = "overlay_status"
         private const val KEY_OVERLAY_ENABLED = "overlay_enabled"
         private const val KEY_ROTATION_INTERVAL_SECONDS = "rotation_interval_seconds"
@@ -46,6 +61,10 @@ class OverlayPreferences(context: Context) {
         const val DEFAULT_HANZI_SIZE = 30
         const val DEFAULT_PINYIN_SIZE = 13
         const val DEFAULT_ENGLISH_SIZE = 14
+
+        const val DEFAULT_HANZI_COLOR = -593174
+        const val DEFAULT_PINYIN_COLOR = -5257512
+        const val DEFAULT_ENGLISH_COLOR = -2575254
 
         const val MIN_HANZI_SIZE = 18
         const val MAX_HANZI_SIZE = 56

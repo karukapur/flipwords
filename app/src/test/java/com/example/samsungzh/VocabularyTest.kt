@@ -6,8 +6,16 @@ import org.junit.Test
 
 class VocabularyTest {
     @Test
-    fun vocabularyHasOneHundredTwelveEntries() {
-        assertEquals(112, Vocabulary.words.size)
+    fun vocabularyHasFiveHundredEntries() {
+        assertEquals(500, Vocabulary.words.size)
+    }
+
+    @Test
+    fun vocabularyHasNoDuplicateHanzi() {
+        assertEquals(
+            Vocabulary.words.size,
+            Vocabulary.words.map { it.hanzi }.toSet().size,
+        )
     }
 
     @Test

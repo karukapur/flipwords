@@ -10,9 +10,9 @@ Native Android app for a Samsung Galaxy Z Flip 6 cover screen. It shows one Chin
 
 - A full app view that shows the same word in a larger top-left layout.
 - An experimental overlay mode that tries to place the word on the first cover clock screen.
-- Text-size controls for the experimental overlay.
+- Text-size and color controls for the experimental overlay.
 - A test-mode word frequency slider from seconds up to 90 minutes.
-- Offline vocabulary bundled in Kotlin.
+- Offline vocabulary bundled in Kotlin with 500 beginner/intermediate Traditional Chinese words and phrases.
 - WorkManager scheduling for background word-state refreshes.
 
 ## App Icon
@@ -68,6 +68,6 @@ Samsung may keep third-party widgets on the swipeable Flex Window widget page in
 
 The app prefers cover display id `1` when available, then tries any other non-main display. It never falls back to the main inner display, so opening the phone should not show the floating overlay on the big screen. The debug text in the app shows which displays Android reports and whether the overlay is attached, waiting, or blocked.
 
-The overlay uses a transparent background. Use the Hanzi, pinyin, and English sliders in the app to adjust its text sizes. If Samsung blocks overlays on the cover clock screen, the foreground notification still shows the current word as a fallback.
+The overlay uses a transparent background. Use the Hanzi, pinyin, and English sliders and color swatches in the app to adjust its text sizes and colors. If Samsung blocks overlays on the cover clock screen, the foreground notification still shows the current word as a fallback.
 
 Use the word timing slider to test fast rotations. The foreground overlay service refreshes around the next configured rotation time, so short intervals such as `5s` are useful while testing. Android's background WorkManager scheduler has a minimum periodic interval of about 15 minutes, so very short intervals are only reliable while the overlay service is running.
