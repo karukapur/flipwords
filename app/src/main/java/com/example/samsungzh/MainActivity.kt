@@ -2,6 +2,8 @@ package com.example.samsungzh
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
+import android.app.TimePickerDialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -21,6 +23,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -28,6 +31,8 @@ import java.util.Locale
 class MainActivity : Activity() {
     private lateinit var repository: WordRepository
     private lateinit var overlayPreferences: OverlayPreferences
+    private lateinit var aiLabPreferences: AiLabPreferences
+    private lateinit var aiModelManager: AiModelManager
     private lateinit var hanziView: TextView
     private lateinit var pinyinView: TextView
     private lateinit var englishView: TextView
@@ -37,11 +42,18 @@ class MainActivity : Activity() {
     private lateinit var permissionStatusView: TextView
     private lateinit var rotationStatusView: TextView
     private lateinit var displayStatusView: TextView
+    private lateinit var aiModelStatusView: TextView
+    private lateinit var aiGeneratedStatusView: TextView
+    private lateinit var aiScheduleStatusView: TextView
+    private lateinit var aiSourceStatusView: TextView
+    private var aiFailurePromptShowing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = WordRepository(this)
         overlayPreferences = OverlayPreferences(this)
+        aiLabPreferences = AiLabPreferences(this)
+        aiModelManager = AiModelManager(this)
         WordUpdateScheduler.schedule(this)
         configureSystemBars()
         buildLayout()
@@ -76,6 +88,7 @@ class MainActivity : Activity() {
         root.addView(buildPreviewCard(), textLayoutParams(topMargin = 14))
         root.addView(buildStyleCard(), textLayoutParams(topMargin = 14))
         root.addView(buildTimingCard(), textLayoutParams(topMargin = 14))
+        root.addView(buildAiLabCard(), textLayoutParams(topMargin = 14))
         root.addView(buildStatusCard(), textLayoutParams(topMargin = 14))
         setContentView(scrollView)
         root.requestApplyInsets()
@@ -285,6 +298,125 @@ class MainActivity : Activity() {
         return card
     }
 
+    private fun buildAiLabCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTextView("AI Lab"))
+        card.addView(
+            infoTextView().apply {
+                text = "Optional local generation with Google LiteRT-LM. The model is downloaded only when you choose it, and the built-in list stays available."
+            },
+            textLayoutParams(topMargin = 10),
+        )
+
+        aiModelStatusView = infoTextView()
+        aiGeneratedStatusView = infoTextView()
+        aiScheduleStatusView = infoTextView()
+        aiSourceStatusView = infoTextView()
+        card.addView(aiModelStatusView, textLayoutParams(topMargin = 12))
+        card.addView(aiGeneratedStatusView, textLayoutParams(topMargin = 8))
+        card.addView(aiSourceStatusView, textLayoutParams(topMargin = 8))
+        card.addView(aiScheduleStatusView, textLayoutParams(topMargin = 8))
+
+        card.addView(
+            actionButton("Download AI model", primary = false).apply {
+                setOnClickListener {
+                    aiModelManager.startDownload()
+                    render()
+                }
+            },
+            textLayoutParams(topMargin = 14),
+        )
+        card.addView(
+            actionButton("Generate now", primary = true).apply {
+                setOnClickListener {
+                    maybeRequestNotificationPermission()
+                    AiVocabularyGenerationWorker.enqueue(this@MainActivity)
+                    render()
+                }
+            },
+            textLayoutParams(topMargin = 8),
+        )
+        card.addView(
+            actionButton("Save AI debug log", primary = false).apply {
+                setOnClickListener {
+                    if (aiLabPreferences.pendingDebugLog.isBlank()) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "No AI failure log available yet.",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    } else {
+                        showSaveAiLogPrompt(aiLabPreferences.lastFailureLogId)
+                    }
+                }
+            },
+            textLayoutParams(topMargin = 8),
+        )
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(
+            actionButton("Source", primary = false).apply {
+                setOnClickListener {
+                    aiLabPreferences.sourceMode = nextSourceMode(aiLabPreferences.sourceMode)
+                    repository.pinWord(repository.currentWord())
+                    refreshOverlay()
+                    render()
+                }
+            },
+            weightedButtonLayoutParams(),
+        )
+        row.addView(
+            actionButton("Time", primary = false).apply {
+                setOnClickListener { showGenerationTimePicker() }
+            },
+            weightedButtonLayoutParams(startMargin = 10),
+        )
+        card.addView(row, textLayoutParams(topMargin = 8))
+
+        val scheduleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        scheduleRow.addView(
+            actionButton("Schedule daily", primary = false).apply {
+                setOnClickListener {
+                    if (AiGenerationScheduler.canScheduleExact(this@MainActivity)) {
+                        aiLabPreferences.dailyGenerationEnabled = true
+                        AiGenerationScheduler.scheduleNext(this@MainActivity)
+                    } else {
+                        startActivity(AiGenerationScheduler.permissionIntent(this@MainActivity))
+                    }
+                    render()
+                }
+            },
+            weightedButtonLayoutParams(),
+        )
+        scheduleRow.addView(
+            actionButton("Disable daily", primary = false).apply {
+                setOnClickListener {
+                    AiGenerationScheduler.cancel(this@MainActivity)
+                    render()
+                }
+            },
+            weightedButtonLayoutParams(startMargin = 10),
+        )
+        card.addView(scheduleRow, textLayoutParams(topMargin = 8))
+
+        card.addView(
+            actionButton("Alarm permission", primary = false).apply {
+                setOnClickListener {
+                    startActivity(AiGenerationScheduler.permissionIntent(this@MainActivity))
+                }
+            },
+            textLayoutParams(topMargin = 8),
+        )
+
+        return card
+    }
+
     private fun buildStatusCard(): LinearLayout {
         val card = card()
         card.addView(sectionTextView("Device status"))
@@ -318,6 +450,25 @@ class MainActivity : Activity() {
                 DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(info.nextRotationMillis))
             }"
         displayStatusView.text = displayDebugText()
+        renderAiLab()
+    }
+
+    private fun renderAiLab() {
+        if (!::aiModelStatusView.isInitialized) return
+
+        val modelStatus = aiModelManager.refreshStatus()
+        aiModelStatusView.text =
+            "$modelStatus\nModel: ${AiModelManager.MODEL_REPOSITORY}\nFile: ${AiModelManager.MODEL_FILE_NAME}"
+        aiGeneratedStatusView.text =
+            "${aiLabPreferences.generatedStatus}\nEntries: ${aiLabPreferences.generatedCount}\nLast run: ${formatOptionalTime(aiLabPreferences.lastGenerationMillis)}"
+        aiSourceStatusView.text =
+            "Active source: ${aiLabPreferences.sourceMode.label}\nCurrent active bucket: ${repository.activeWords().size} entries"
+
+        val exactStatus = if (AiGenerationScheduler.canScheduleExact(this)) "granted" else "blocked"
+        val enabled = if (aiLabPreferences.dailyGenerationEnabled) "enabled" else "off"
+        aiScheduleStatusView.text =
+            "Daily generation: $enabled at ${formatGenerationTime()}\nExact alarm permission: $exactStatus\nNext scheduled: ${formatOptionalTime(aiLabPreferences.lastScheduledGenerationMillis)}"
+        maybePromptForAiFailureLog()
     }
 
     private fun overlayPermissionText(): String =
@@ -481,6 +632,91 @@ class MainActivity : Activity() {
         root.addView(label, textLayoutParams(topMargin = 14))
         root.addView(seekBar, textLayoutParams(topMargin = 4))
     }
+
+    private fun showGenerationTimePicker() {
+        TimePickerDialog(
+            this,
+            { _, hour, minute ->
+                aiLabPreferences.dailyGenerationHour = hour
+                aiLabPreferences.dailyGenerationMinute = minute
+                if (aiLabPreferences.dailyGenerationEnabled) {
+                    AiGenerationScheduler.scheduleNext(this)
+                }
+                render()
+            },
+            aiLabPreferences.dailyGenerationHour,
+            aiLabPreferences.dailyGenerationMinute,
+            true,
+        ).show()
+    }
+
+    private fun maybePromptForAiFailureLog() {
+        val failureId = aiLabPreferences.lastFailureLogId
+        val shouldPrompt = failureId > 0L &&
+            failureId != aiLabPreferences.promptedFailureLogId &&
+            aiLabPreferences.generatedStatus.startsWith(AiLabPreferences.GENERATED_FAILED) &&
+            aiLabPreferences.pendingDebugLog.isNotBlank()
+
+        if (!shouldPrompt || aiFailurePromptShowing) return
+
+        aiGeneratedStatusView.post {
+            if (!isFinishing && !isDestroyed) {
+                showSaveAiLogPrompt(failureId)
+            }
+        }
+    }
+
+    private fun showSaveAiLogPrompt(failureId: Long) {
+        if (aiFailurePromptShowing) return
+
+        aiFailurePromptShowing = true
+        AlertDialog.Builder(this)
+            .setTitle("Save AI debug log?")
+            .setMessage("AI vocabulary generation failed. Save a text log so it can be shared for debugging?")
+            .setPositiveButton("Save log") { _, _ ->
+                aiLabPreferences.promptedFailureLogId = failureId
+                saveAiDebugLog()
+                aiFailurePromptShowing = false
+            }
+            .setNegativeButton("Not now") { _, _ ->
+                aiLabPreferences.promptedFailureLogId = failureId
+                aiFailurePromptShowing = false
+            }
+            .setOnCancelListener {
+                aiLabPreferences.promptedFailureLogId = failureId
+                aiFailurePromptShowing = false
+            }
+            .show()
+    }
+
+    private fun saveAiDebugLog() {
+        val file = AiDebugLogDumper.savePendingLog(this)
+        if (file == null) {
+            Toast.makeText(this, "No AI failure log available yet.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        Toast.makeText(
+            this,
+            "AI debug log saved: ${file.absolutePath}",
+            Toast.LENGTH_LONG,
+        ).show()
+    }
+
+    private fun nextSourceMode(current: AiVocabularySourceMode): AiVocabularySourceMode {
+        val modes = AiVocabularySourceMode.values()
+        return modes[(modes.indexOf(current) + 1) % modes.size]
+    }
+
+    private fun formatGenerationTime(): String =
+        String.format(Locale.US, "%02d:%02d", aiLabPreferences.dailyGenerationHour, aiLabPreferences.dailyGenerationMinute)
+
+    private fun formatOptionalTime(millis: Long): String =
+        if (millis <= 0L) {
+            "not set"
+        } else {
+            DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(millis))
+        }
 
     private fun refreshOverlay() {
         if (overlayPreferences.overlayEnabled) {

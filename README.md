@@ -13,6 +13,7 @@ Native Android app for a Samsung Galaxy Z Flip 6 cover screen. It shows one Chin
 - Text-size and color controls for the experimental overlay.
 - A test-mode word frequency slider from seconds up to 90 minutes.
 - Offline vocabulary bundled in Kotlin with 500 beginner/intermediate Traditional Chinese words and phrases.
+- An opt-in AI Lab that can download a LiteRT-LM model and generate local vocabulary packs.
 - WorkManager scheduling for background word-state refreshes.
 
 ## App Icon
@@ -71,3 +72,18 @@ The app prefers cover display id `1` when available, then tries any other non-ma
 The overlay uses a transparent background. Use the Hanzi, pinyin, and English sliders and color swatches in the app to adjust its text sizes and colors. If Samsung blocks overlays on the cover clock screen, the foreground notification still shows the current word as a fallback.
 
 Use the word timing slider to test fast rotations. The foreground overlay service refreshes around the next configured rotation time, so short intervals such as `5s` are useful while testing. Android's background WorkManager scheduler has a minimum periodic interval of about 15 minutes, so very short intervals are only reliable while the overlay service is running.
+
+## Experimental AI Lab
+
+FlipWords includes an opt-in local AI Lab for personal testing. It keeps the built-in 500-entry list as the stable fallback, then lets you download Google's LiteRT-LM Android model and generate a 50-entry local pack of compact Traditional Taiwanese Mandarin words and short phrases.
+
+- Model: `litert-community/gemma-4-E2B-it-litert-lm`
+- File: `gemma-4-E2B-it.litertlm`
+- Dependency: `com.google.ai.edge.litertlm:litertlm-android:0.13.1`
+- Download behavior: on demand only; the model is not bundled in the APK.
+
+Inside the app, use `AI Lab` to download the model, run generation manually, choose the active source mode, and set the exact daily generation time. Exact daily generation needs Android's Alarms & reminders permission; if that permission is blocked, manual generation still works.
+
+Generated packs are saved only after validation accepts 50 entries. The validator rejects empty fields, overlong cover-screen text, duplicates, sentence punctuation, and known Simplified-only characters. If download or generation fails, FlipWords continues using the built-in list.
+
+If AI generation fails, FlipWords records a pending diagnostic log. The next time the app is open, it asks whether to save a `.txt` debug log. You can also tap `Save AI debug log` in AI Lab. Saved logs are written under the app's external documents folder in `FlipWordsLogs`, and the app shows the exact file path in a Toast.

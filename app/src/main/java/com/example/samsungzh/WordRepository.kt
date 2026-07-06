@@ -5,30 +5,34 @@ import android.content.Context
 class WordRepository(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val overlayPreferences = OverlayPreferences(context)
+    private val aiLabPreferences = AiLabPreferences(context)
+    private val generatedVocabularyStore = GeneratedVocabularyStore(context)
 
     fun currentWord(nowMillis: Long = System.currentTimeMillis()): WordEntry {
+        val words = activeWords()
         val anchor = ensureAnchor(nowMillis)
         val index = WordRotator.indexFor(
             nowMillis = nowMillis,
             anchorMillis = anchor,
-            wordCount = Vocabulary.words.size,
+            wordCount = words.size,
             intervalMillis = overlayPreferences.rotationIntervalMillis,
         )
-        return Vocabulary.words[index]
+        return words[index]
     }
 
     fun advanceWord(nowMillis: Long = System.currentTimeMillis()): WordEntry {
+        val words = activeWords()
         val current = currentWord(nowMillis)
-        val currentIndex = Vocabulary.words.indexOf(current)
-        val nextIndex = (currentIndex + 1) % Vocabulary.words.size
+        val currentIndex = words.indexOf(current).coerceAtLeast(0)
+        val nextIndex = (currentIndex + 1) % words.size
         prefs.edit()
             .putLong(KEY_ANCHOR_MILLIS, nowMillis - (nextIndex.toLong() * overlayPreferences.rotationIntervalMillis))
             .apply()
-        return Vocabulary.words[nextIndex]
+        return words[nextIndex]
     }
 
     fun pinWord(word: WordEntry, nowMillis: Long = System.currentTimeMillis()) {
-        val index = Vocabulary.words.indexOf(word).coerceAtLeast(0)
+        val index = activeWords().indexOf(word).coerceAtLeast(0)
         prefs.edit()
             .putLong(KEY_ANCHOR_MILLIS, nowMillis - (index.toLong() * overlayPreferences.rotationIntervalMillis))
             .apply()
@@ -43,6 +47,15 @@ class WordRepository(context: Context) {
             currentWord = currentWord(nowMillis),
             nextRotationMillis = currentSlotStart + intervalMillis,
             intervalMillis = intervalMillis,
+        )
+    }
+
+    fun activeWords(): List<WordEntry> {
+        val generated = generatedVocabularyStore.loadEntries().map { it.toWordEntry() }
+        return ActiveVocabularySelector.select(
+            builtIn = Vocabulary.words,
+            generated = generated,
+            sourceMode = aiLabPreferences.sourceMode,
         )
     }
 
