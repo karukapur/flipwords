@@ -11,6 +11,8 @@ import android.graphics.drawable.GradientDrawable
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.Display
 import android.view.Gravity
@@ -20,6 +22,7 @@ import android.widget.HorizontalScrollView
 import android.view.WindowInsets
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
@@ -29,6 +32,7 @@ import java.util.Date
 import java.util.Locale
 
 class MainActivity : Activity() {
+    private val handler = Handler(Looper.getMainLooper())
     private lateinit var repository: WordRepository
     private lateinit var overlayPreferences: OverlayPreferences
     private lateinit var aiLabPreferences: AiLabPreferences
@@ -46,7 +50,20 @@ class MainActivity : Activity() {
     private lateinit var aiGeneratedStatusView: TextView
     private lateinit var aiScheduleStatusView: TextView
     private lateinit var aiSourceStatusView: TextView
+    private lateinit var aiDownloadProgressBar: ProgressBar
+    private lateinit var aiDownloadProgressView: TextView
     private var aiFailurePromptShowing = false
+
+    private val downloadProgressRunnable = object : Runnable {
+        override fun run() {
+            if (::aiDownloadProgressBar.isInitialized) {
+                render()
+                if (aiModelManager.downloadProgress().isDownloading) {
+                    handler.postDelayed(this, DOWNLOAD_PROGRESS_REFRESH_MILLIS)
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,6 +82,11 @@ class MainActivity : Activity() {
         if (::permissionStatusView.isInitialized) {
             render()
         }
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacks(downloadProgressRunnable)
+        super.onDestroy()
     }
 
     private fun buildLayout() {
@@ -309,10 +331,17 @@ class MainActivity : Activity() {
         )
 
         aiModelStatusView = infoTextView()
+        aiDownloadProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = 0
+        }
+        aiDownloadProgressView = infoTextView()
         aiGeneratedStatusView = infoTextView()
         aiScheduleStatusView = infoTextView()
         aiSourceStatusView = infoTextView()
         card.addView(aiModelStatusView, textLayoutParams(topMargin = 12))
+        card.addView(aiDownloadProgressBar, textLayoutParams(topMargin = 8))
+        card.addView(aiDownloadProgressView, textLayoutParams(topMargin = 4))
         card.addView(aiGeneratedStatusView, textLayoutParams(topMargin = 8))
         card.addView(aiSourceStatusView, textLayoutParams(topMargin = 8))
         card.addView(aiScheduleStatusView, textLayoutParams(topMargin = 8))
@@ -432,11 +461,12 @@ class MainActivity : Activity() {
     private fun render() {
         val info = repository.rotationInfo()
         val word = info.currentWord
+        val pinyin = PinyinToneFormatter.format(word)
         hanziView.text = word.hanzi
-        pinyinView.text = "[${word.pinyin}]"
+        pinyinView.text = "[$pinyin]"
         englishView.text = word.english
         previewHanziView.text = word.hanzi
-        previewPinyinView.text = "[${word.pinyin}]"
+        previewPinyinView.text = "[$pinyin]"
         previewEnglishView.text = word.english
         previewHanziView.textSize = overlayPreferences.hanziSizeSp.toFloat()
         previewPinyinView.textSize = overlayPreferences.pinyinSizeSp.toFloat()
@@ -457,8 +487,22 @@ class MainActivity : Activity() {
         if (!::aiModelStatusView.isInitialized) return
 
         val modelStatus = aiModelManager.refreshStatus()
+        val downloadProgress = aiModelManager.downloadProgress()
         aiModelStatusView.text =
             "$modelStatus\nModel: ${AiModelManager.MODEL_REPOSITORY}\nFile: ${AiModelManager.MODEL_FILE_NAME}"
+        aiDownloadProgressBar.progress = downloadProgress.percent
+        aiDownloadProgressBar.visibility = if (
+            downloadProgress.isDownloading ||
+            downloadProgress.status == AiLabPreferences.MODEL_READY
+        ) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+        aiDownloadProgressView.text =
+            "Download: ${downloadProgress.percent}% (${formatBytes(downloadProgress.downloadedBytes)} / ${formatBytes(downloadProgress.totalBytes)})"
+        aiDownloadProgressView.visibility = aiDownloadProgressBar.visibility
+        updateDownloadProgressLoop(downloadProgress.isDownloading)
         aiGeneratedStatusView.text =
             "${aiLabPreferences.generatedStatus}\nEntries: ${aiLabPreferences.generatedCount}\nLast run: ${formatOptionalTime(aiLabPreferences.lastGenerationMillis)}"
         aiSourceStatusView.text =
@@ -488,7 +532,7 @@ class MainActivity : Activity() {
             }
             "Display ${display.displayId} ($marker): ${display.name}"
         }
-        return "${overlayPreferences.overlayStatus}\nMain display fallback disabled.\nDetected displays:\n$displays"
+        return "${overlayPreferences.overlayStatus}\nMain display fallback disabled.\nOverlay scope: cover display-wide; Samsung does not expose the active cover page.\nDetected displays:\n$displays"
     }
 
     private fun addTextStyleControl(
@@ -718,6 +762,18 @@ class MainActivity : Activity() {
             DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(millis))
         }
 
+    private fun updateDownloadProgressLoop(isDownloading: Boolean) {
+        handler.removeCallbacks(downloadProgressRunnable)
+        if (isDownloading) {
+            handler.postDelayed(downloadProgressRunnable, DOWNLOAD_PROGRESS_REFRESH_MILLIS)
+        }
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        val gib = bytes / (1024.0 * 1024.0 * 1024.0)
+        return String.format(Locale.US, "%.2f GB", gib)
+    }
+
     private fun refreshOverlay() {
         if (overlayPreferences.overlayEnabled) {
             startService(
@@ -873,6 +929,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQUEST_POST_NOTIFICATIONS = 42
+        private const val DOWNLOAD_PROGRESS_REFRESH_MILLIS = 1_000L
 
         private val APP_BACKGROUND = Color.parseColor("#F5F6F8")
         private val APP_SURFACE = Color.WHITE

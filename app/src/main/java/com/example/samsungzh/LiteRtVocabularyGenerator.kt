@@ -99,13 +99,13 @@ No full sentences. No simplified Chinese.
 Each item must have exactly these fields: hanzi, pinyin, english.
 Constraints:
 - hanzi must be Traditional Chinese, 1 to 8 characters.
-- pinyin must use spaces, no tone marks, max 48 characters.
+- pinyin must use spaces and tone marks, not tone numbers, max 48 characters.
 - english must be compact, max 36 characters.
 - Avoid duplicates.
 Example:
 [
-  {"hanzi":"捷運站","pinyin":"jie yun zhan","english":"MRT station"},
-  {"hanzi":"少冰","pinyin":"shao bing","english":"less ice"}
+  {"hanzi":"捷運站","pinyin":"jié yùn zhàn","english":"MRT station"},
+  {"hanzi":"少冰","pinyin":"shǎo bīng","english":"less ice"}
 ]
 """
     }

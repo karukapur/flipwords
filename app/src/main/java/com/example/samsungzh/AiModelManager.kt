@@ -17,40 +17,36 @@ class AiModelManager(context: Context) {
     }
 
     fun refreshStatus(): String {
-        val file = modelFile()
-        if (file.exists() && file.length() >= MIN_MODEL_BYTES) {
-            prefs.modelStatus = AiLabPreferences.MODEL_READY
+        val downloadProgress = queryDownloadProgress()
+        if (downloadProgress != null) {
+            prefs.modelStatus = downloadProgress.status
             return prefs.modelStatus
         }
 
-        val downloadId = prefs.modelDownloadId
-        if (downloadId != AiLabPreferences.NO_DOWNLOAD_ID) {
-            downloadManager.query(DownloadManager.Query().setFilterById(downloadId))?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                    prefs.modelStatus = when (status) {
-                        DownloadManager.STATUS_RUNNING,
-                        DownloadManager.STATUS_PENDING,
-                        DownloadManager.STATUS_PAUSED -> AiLabPreferences.MODEL_DOWNLOADING
+        val file = modelFile()
+        prefs.modelStatus = if (file.exists() && file.length() >= MIN_MODEL_BYTES) {
+            AiLabPreferences.MODEL_READY
+        } else {
+            AiLabPreferences.MODEL_NOT_DOWNLOADED
+        }
+        return prefs.modelStatus
+    }
 
-                        DownloadManager.STATUS_SUCCESSFUL -> {
-                            if (file.exists() && file.length() >= MIN_MODEL_BYTES) {
-                                AiLabPreferences.MODEL_READY
-                            } else {
-                                AiLabPreferences.MODEL_FAILED
-                            }
-                        }
+    fun downloadProgress(): AiModelDownloadProgress {
+        queryDownloadProgress()?.let { return it }
 
-                        DownloadManager.STATUS_FAILED -> AiLabPreferences.MODEL_FAILED
-                        else -> AiLabPreferences.MODEL_NOT_DOWNLOADED
-                    }
-                    return prefs.modelStatus
-                }
-            }
+        val file = modelFile()
+        val status = if (file.exists() && file.length() >= MIN_MODEL_BYTES) {
+            AiLabPreferences.MODEL_READY
+        } else {
+            prefs.modelStatus
         }
 
-        prefs.modelStatus = AiLabPreferences.MODEL_NOT_DOWNLOADED
-        return prefs.modelStatus
+        return AiModelDownloadProgress(
+            status = status,
+            downloadedBytes = file.length().coerceAtLeast(0L),
+            totalBytes = if (status == AiLabPreferences.MODEL_READY) file.length() else MIN_MODEL_BYTES,
+        )
     }
 
     fun startDownload(): Long {
@@ -82,4 +78,69 @@ class AiModelManager(context: Context) {
 
         private const val MIN_MODEL_BYTES = 2L * 1024L * 1024L * 1024L
     }
+
+    private fun queryDownloadProgress(): AiModelDownloadProgress? {
+        val downloadId = prefs.modelDownloadId
+        if (downloadId == AiLabPreferences.NO_DOWNLOAD_ID) return null
+
+        downloadManager.query(DownloadManager.Query().setFilterById(downloadId))?.use { cursor ->
+            if (!cursor.moveToFirst()) return null
+
+            val statusCode = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+            val file = modelFile()
+            val downloaded = cursor.getLong(
+                cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR),
+            ).takeIf { it >= 0L } ?: file.length().coerceAtLeast(0L)
+            val reportedTotal = cursor.getLong(
+                cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES),
+            )
+            val status = when (statusCode) {
+                DownloadManager.STATUS_SUCCESSFUL -> {
+                    if (file.exists() && file.length() >= MIN_MODEL_BYTES) {
+                        AiLabPreferences.MODEL_READY
+                    } else {
+                        AiLabPreferences.MODEL_FAILED
+                    }
+                }
+
+                else -> statusLabel(statusCode)
+            }
+            val total = when {
+                reportedTotal > 0L -> reportedTotal
+                statusCode == DownloadManager.STATUS_SUCCESSFUL && file.exists() -> file.length()
+                else -> MIN_MODEL_BYTES
+            }
+
+            return AiModelDownloadProgress(
+                status = status,
+                downloadedBytes = downloaded,
+                totalBytes = total,
+            )
+        }
+
+        return null
+    }
+
+    private fun statusLabel(status: Int): String =
+        when (status) {
+            DownloadManager.STATUS_RUNNING,
+            DownloadManager.STATUS_PENDING,
+            DownloadManager.STATUS_PAUSED -> AiLabPreferences.MODEL_DOWNLOADING
+
+            DownloadManager.STATUS_SUCCESSFUL -> AiLabPreferences.MODEL_READY
+            DownloadManager.STATUS_FAILED -> AiLabPreferences.MODEL_FAILED
+            else -> AiLabPreferences.MODEL_NOT_DOWNLOADED
+        }
+}
+
+data class AiModelDownloadProgress(
+    val status: String,
+    val downloadedBytes: Long,
+    val totalBytes: Long,
+) {
+    val percent: Int
+        get() = if (totalBytes <= 0L) 0 else ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
+
+    val isDownloading: Boolean
+        get() = status == AiLabPreferences.MODEL_DOWNLOADING
 }

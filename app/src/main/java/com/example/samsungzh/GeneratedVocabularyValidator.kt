@@ -82,6 +82,7 @@ object GeneratedVocabularyValidator {
         if (entry.hanzi in existingHanzi) return false
         if (entry.hanzi.any { it in simplifiedOnlyCharacters }) return false
         if (entry.hanzi.any { it in sentencePunctuation }) return false
+        if (entry.pinyin.none { it in toneMarks }) return false
         return entry.hanzi.any { it.code in CJK_RANGE }
     }
 
@@ -108,4 +109,8 @@ object GeneratedVocabularyValidator {
     }
 
     private val CJK_RANGE = 0x4E00..0x9FFF
+    private val toneMarks = setOf(
+        'ā', 'á', 'ǎ', 'à', 'ē', 'é', 'ě', 'è', 'ī', 'í', 'ǐ', 'ì',
+        'ō', 'ó', 'ǒ', 'ò', 'ū', 'ú', 'ǔ', 'ù', 'ǖ', 'ǘ', 'ǚ', 'ǜ',
+    )
 }

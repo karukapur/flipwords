@@ -212,8 +212,9 @@ class CoverOverlayService : Service() {
 
     private fun refreshOverlayAndNotification() {
         val word = repository.currentWord()
+        val pinyin = PinyinToneFormatter.format(word)
         overlayView?.findViewById<TextView>(R.id.overlay_hanzi)?.text = word.hanzi
-        overlayView?.findViewById<TextView>(R.id.overlay_pinyin)?.text = "[${word.pinyin}]"
+        overlayView?.findViewById<TextView>(R.id.overlay_pinyin)?.text = "[$pinyin]"
         overlayView?.findViewById<TextView>(R.id.overlay_english)?.text = word.english
         applyOverlayTextStyles()
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
@@ -259,6 +260,7 @@ class CoverOverlayService : Service() {
 
     private fun buildNotification(): Notification {
         val word = repository.currentWord()
+        val pinyin = PinyinToneFormatter.format(word)
         val openIntent = PendingIntent.getActivity(
             this,
             0,
@@ -280,7 +282,7 @@ class CoverOverlayService : Service() {
 
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("${word.hanzi} [${word.pinyin}]")
+            .setContentTitle("${word.hanzi} [$pinyin]")
             .setContentText("${word.english} - $displayLabel")
             .setOngoing(true)
             .setContentIntent(openIntent)

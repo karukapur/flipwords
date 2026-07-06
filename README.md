@@ -69,6 +69,8 @@ Samsung may keep third-party widgets on the swipeable Flex Window widget page in
 
 The app prefers cover display id `1` when available, then tries any other non-main display. It never falls back to the main inner display, so opening the phone should not show the floating overlay on the big screen. The debug text in the app shows which displays Android reports and whether the overlay is attached, waiting, or blocked.
 
+The experimental overlay attaches to the whole cover display. Samsung does not expose the active cover page to normal Android overlay apps, so the overlay cannot currently know whether you are on the first clock page or a swiped widget page.
+
 The overlay uses a transparent background. Use the Hanzi, pinyin, and English sliders and color swatches in the app to adjust its text sizes and colors. If Samsung blocks overlays on the cover clock screen, the foreground notification still shows the current word as a fallback.
 
 Use the word timing slider to test fast rotations. The foreground overlay service refreshes around the next configured rotation time, so short intervals such as `5s` are useful while testing. Android's background WorkManager scheduler has a minimum periodic interval of about 15 minutes, so very short intervals are only reliable while the overlay service is running.
@@ -82,8 +84,8 @@ FlipWords includes an opt-in local AI Lab for personal testing. It keeps the bui
 - Dependency: `com.google.ai.edge.litertlm:litertlm-android:0.13.1`
 - Download behavior: on demand only; the model is not bundled in the APK.
 
-Inside the app, use `AI Lab` to download the model, run generation manually, choose the active source mode, and set the exact daily generation time. Exact daily generation needs Android's Alarms & reminders permission; if that permission is blocked, manual generation still works.
+Inside the app, use `AI Lab` to download the model, track download progress, run generation manually, choose the active source mode, and set the exact daily generation time. Exact daily generation needs Android's Alarms & reminders permission; if that permission is blocked, manual generation still works.
 
-Generated packs are saved only after validation accepts 50 entries. The validator rejects empty fields, overlong cover-screen text, duplicates, sentence punctuation, and known Simplified-only characters. If download or generation fails, FlipWords continues using the built-in list.
+Generated packs are saved only after validation accepts 50 entries. The validator rejects empty fields, overlong cover-screen text, duplicates, sentence punctuation, pinyin without tone marks, and known Simplified-only characters. If download or generation fails, FlipWords continues using the built-in list.
 
 If AI generation fails, FlipWords records a pending diagnostic log. The next time the app is open, it asks whether to save a `.txt` debug log. You can also tap `Save AI debug log` in AI Lab. Saved logs are written under the app's external documents folder in `FlipWordsLogs`, and the app shows the exact file path in a Toast.
