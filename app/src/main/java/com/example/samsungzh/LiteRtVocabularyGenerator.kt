@@ -6,12 +6,15 @@ import java.io.File
 import java.util.Collections
 
 class LiteRtVocabularyGenerator {
-    suspend fun generate(modelFile: File): String = withContext(Dispatchers.Default) {
-        runCatching { generateWithBackend(modelFile, backendName = "GPU") }
-            .getOrElse { generateWithBackend(modelFile, backendName = "CPU") }
+    suspend fun generate(
+        modelFile: File,
+        hskLevel: AiHskLevel = AiHskLevel.HSK_2,
+    ): String = withContext(Dispatchers.Default) {
+        runCatching { generateWithBackend(modelFile, hskLevel, backendName = "GPU") }
+            .getOrElse { generateWithBackend(modelFile, hskLevel, backendName = "CPU") }
     }
 
-    private fun generateWithBackend(modelFile: File, backendName: String): String {
+    private fun generateWithBackend(modelFile: File, hskLevel: AiHskLevel, backendName: String): String {
         val packageName = "com.google.ai.edge.litertlm"
         val backendClass = Class.forName("$packageName.Backend")
         val backend = createBackend(packageName, backendName)
@@ -32,7 +35,7 @@ class LiteRtVocabularyGenerator {
             try {
                 val message = conversation.javaClass
                     .getMethod("sendMessage", String::class.java, Map::class.java)
-                    .invoke(conversation, promptWithSystemInstruction(), Collections.emptyMap<String, Any>())
+                    .invoke(conversation, promptWithSystemInstruction(hskLevel), Collections.emptyMap<String, Any>())
                 message.toString()
             } finally {
                 conversation.closeIfPossible()
@@ -85,8 +88,8 @@ class LiteRtVocabularyGenerator {
         }
     }
 
-    private fun promptWithSystemInstruction(): String =
-        "$SYSTEM_INSTRUCTION\n\n$PROMPT"
+    private fun promptWithSystemInstruction(hskLevel: AiHskLevel): String =
+        "$SYSTEM_INSTRUCTION\n\nTarget level: ${hskLevel.promptDescription}.\n\n$PROMPT"
 
     companion object {
         private const val SYSTEM_INSTRUCTION =

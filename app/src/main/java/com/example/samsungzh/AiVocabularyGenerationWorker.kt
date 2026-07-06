@@ -25,7 +25,7 @@ class AiVocabularyGenerationWorker(
     override suspend fun doWork(): Result {
         createNotificationChannel()
         setForeground(generationForegroundInfo("Generating vocabulary..."))
-        prefs.generatedStatus = AiLabPreferences.GENERATED_RUNNING
+        prefs.generatedStatus = "${AiLabPreferences.GENERATED_RUNNING}: checking model"
 
         if (!modelManager.isReady()) {
             prefs.generatedStatus = "${AiLabPreferences.GENERATED_FAILED}: model not ready"
@@ -38,7 +38,9 @@ class AiVocabularyGenerationWorker(
 
         return try {
             val now = System.currentTimeMillis()
-            val rawOutput = LiteRtVocabularyGenerator().generate(modelManager.modelFile())
+            prefs.generatedStatus = "${AiLabPreferences.GENERATED_RUNNING}: ${prefs.hskLevel.label}, loading model"
+            val rawOutput = LiteRtVocabularyGenerator().generate(modelManager.modelFile(), prefs.hskLevel)
+            prefs.generatedStatus = "${AiLabPreferences.GENERATED_RUNNING}: validating entries"
             val entries = GeneratedVocabularyValidator.parseValidEntries(rawOutput, now)
             if (entries.size < GeneratedVocabularyValidator.REQUIRED_BATCH_SIZE) {
                 prefs.generatedStatus =

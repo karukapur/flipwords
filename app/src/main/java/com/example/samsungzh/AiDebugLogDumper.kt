@@ -74,6 +74,7 @@ object AiDebugLogDumper {
             appendLine("Generated status: ${prefs.generatedStatus}")
             appendLine("Generated count: ${prefs.generatedCount}")
             appendLine("Source mode: ${prefs.sourceMode.label}")
+            appendLine("HSK level: ${prefs.hskLevel.label}")
             appendLine("Daily generation enabled: ${prefs.dailyGenerationEnabled}")
             appendLine("Daily generation time: ${String.format(Locale.US, "%02d:%02d", prefs.dailyGenerationHour, prefs.dailyGenerationMinute)}")
             appendLine("Last scheduled generation millis: ${prefs.lastScheduledGenerationMillis}")

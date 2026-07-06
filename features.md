@@ -38,7 +38,9 @@ This document describes the current FlipWords feature set. It is meant to be a p
 ## Word Rotation
 
 - Default word change interval is 90 minutes.
-- The app has a test-mode timing slider from 5 seconds up to 90 minutes.
+- Word-change frequency is shown as one simple current-value row with a `Change frequency` action.
+- The frequency picker offers common presets: `5 sec`, `1 min`, `15 min`, `30 min`, `60 min`, and `90 min`.
+- A `Custom...` option supports seconds, minutes, and hours, clamped to the supported 5-second to 90-minute range.
 - The current word is calculated from:
   - An anchor timestamp.
   - The configured interval.
@@ -53,24 +55,38 @@ This document describes the current FlipWords feature set. It is meant to be a p
 ## Main App UI
 
 - Native Android Kotlin app using programmatic views.
-- Modern light UI with:
-  - App logo in the header.
-  - Large current-word learning view.
-  - Overlay preview card.
-  - Text styling controls.
-  - Word timing controls.
-  - AI Lab controls.
-  - Device/debug status.
+- Material 3-inspired UI based on `DESIGN.md`.
+- Uses a top brand bar with `FlipWords` left-aligned and the app logo right-aligned.
+- Uses floating icon-and-label bottom navigation for `Learn`, `Style`, `AI Lab`, and `Device`.
+- The selected tab uses a soft pill indicator, primary tint, and a small elevation transition while inactive tabs remain muted.
+- Uses a warm ivory background, deep jade primary actions, muted tonal surfaces, pill-shaped controls, large rounded "digital paper" cards, and subtle shadows.
+- Uses tonal layering plus restrained Material-style elevation instead of heavy card shadows.
+- Main app sections:
+  - `Learn` for the app logo/header, current-word learning card, and overlay/next-word actions.
+  - `Style` for overlay preview, text size controls, color swatches, and word timing.
+  - `AI Lab` for model download, local generation, source mode, scheduling, and failure-log recovery prompts.
+  - `Device` for overlay permission, rotation, display, and debug status.
 - Handles status-bar and navigation-bar padding so content does not sit underneath system bars.
 - Uses the app logo from `app/src/main/res/drawable/flipwords_logo.png`.
 - App label and launcher identity are `FlipWords`.
+- Uses Android system font fallbacks:
+  - Serif fallback for the main Hanzi learning card.
+  - Sans-serif fallback for pinyin, English, labels, and controls.
+- The Learn card shows lightweight metrics for next rotation time, active word bucket size, and current frequency.
+- Buttons and navigation tabs use subtle press/scale feedback.
+- Tab changes and word changes use short fade/slide transitions.
+- Primary actions include small inline icons for faster scanning.
 
 ## Cover Overlay
 
 - Experimental foreground-service overlay for personal sideloaded use.
 - Uses Android `SYSTEM_ALERT_WINDOW` / "Appear on top" permission.
 - Starts from the `Start overlay` button.
-- Stops from the `Stop overlay` button or notification action.
+- The main app uses one stateful overlay button:
+  - Shows `Start overlay` with a play icon when the overlay is off.
+  - Shows `Stop overlay` with a stop icon when the overlay is running.
+- The overlay permission button appears only when Android overlay permission is missing.
+- The overlay can also be stopped from the foreground notification action.
 - Targets the Samsung cover display first:
   - Prefers display id `1`.
   - Falls back only to another non-default display.
@@ -106,6 +122,11 @@ This document describes the current FlipWords feature set. It is meant to be a p
   - Next word.
   - Stop overlay.
 - Acts as a fallback visible surface if Samsung hides or blocks the overlay.
+
+## Device Diagnostics
+
+- Device tab shows overlay permission, rotation, display, and cover-display debug status.
+- Device tab includes `Copy diagnostics` for quickly sharing the current debug text.
 
 ## Text Size Controls
 
@@ -150,6 +171,8 @@ This document describes the current FlipWords feature set. It is meant to be a p
   - Runtime dependency: `com.google.ai.edge.litertlm:litertlm-android:0.13.1`
 - The model is not bundled in the APK.
 - The model is downloaded only when the user taps `Download AI model`.
+- After the model is ready, the download action is hidden and `Delete AI model` appears as a tertiary action at the bottom of AI Lab.
+- The model setup and maintenance actions use download and delete icons.
 - The app stores the downloaded model in app external downloads storage.
 - The app validates that the model file exists and is at least 2 GB before marking it ready.
 - LiteRT-LM is loaded by reflection at runtime.
@@ -158,7 +181,7 @@ This document describes the current FlipWords feature set. It is meant to be a p
 ## AI Model Download Progress
 
 - AI Lab shows model download status.
-- Displays a horizontal progress bar while downloading.
+- Displays a horizontal progress bar only while downloading.
 - Displays downloaded and total size in GB.
 - Refreshes progress every second while the download is active.
 - Uses Android `DownloadManager`.
@@ -168,6 +191,9 @@ This document describes the current FlipWords feature set. It is meant to be a p
 ## AI Vocabulary Generation
 
 - Generation is started manually with `Generate now` or by an exact daily alarm.
+- AI Lab shows an indeterminate in-app generation progress indicator while local generation is running.
+- The manual generation button changes to `Generate 50 words` when ready and `Generating...` while running.
+- AI source and HSK selectors are temporarily disabled while generation is running.
 - Generation runs in a WorkManager `CoroutineWorker`.
 - The worker runs as foreground work with a notification.
 - The worker initializes LiteRT-LM only inside the background generation task.
@@ -176,6 +202,7 @@ This document describes the current FlipWords feature set. It is meant to be a p
   - If GPU initialization/generation fails, retry with CPU.
 - Prompt asks for 80 candidate entries so the validator can accept the first 50 valid unique entries.
 - Generated pack size requirement is exactly 50 valid entries.
+- The user can select an HSK target level before generation.
 - AI-generated content target:
   - Beginner/intermediate Traditional Taiwanese Mandarin.
   - Words and short phrases only.
@@ -223,6 +250,7 @@ This document describes the current FlipWords feature set. It is meant to be a p
   - `Generated first`
   - `Generated only`
   - `Mix both`
+- AI Lab uses custom selector rows for generated source and HSK level instead of native dropdown fields.
 - Default mode is `Generated first`.
 - If no generated pack exists, every mode falls back to the built-in list.
 - `Generated first` uses generated entries before the built-in fallback list.
@@ -234,7 +262,7 @@ This document describes the current FlipWords feature set. It is meant to be a p
 
 - AI Lab provides a time picker for daily generation.
 - Default scheduled time is 02:00.
-- The user can enable or disable daily generation.
+- The user can enable or disable daily generation with a single switch.
 - Exact daily scheduling uses `AlarmManager.setExactAndAllowWhileIdle()`.
 - Requires Android Alarms & reminders permission on supported Android versions.
 - If exact alarm permission is blocked:
@@ -247,7 +275,7 @@ This document describes the current FlipWords feature set. It is meant to be a p
 
 - AI generation failures record a pending diagnostic log.
 - The app asks whether to save the log the next time it is opened after a failure.
-- The AI Lab also includes a manual `Save AI debug log` button.
+- The app does not show a manual `Save AI debug log` button in AI Lab.
 - Saved logs are `.txt` files.
 - Saved logs are written under the app external documents folder in `FlipWordsLogs`.
 - A Toast displays the exact file path after saving.

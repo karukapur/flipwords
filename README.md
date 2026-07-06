@@ -88,4 +88,4 @@ Inside the app, use `AI Lab` to download the model, track download progress, run
 
 Generated packs are saved only after validation accepts 50 entries. The validator rejects empty fields, overlong cover-screen text, duplicates, sentence punctuation, pinyin without tone marks, and known Simplified-only characters. If download or generation fails, FlipWords continues using the built-in list.
 
-If AI generation fails, FlipWords records a pending diagnostic log. The next time the app is open, it asks whether to save a `.txt` debug log. You can also tap `Save AI debug log` in AI Lab. Saved logs are written under the app's external documents folder in `FlipWordsLogs`, and the app shows the exact file path in a Toast.
+If AI generation fails, FlipWords records a pending diagnostic log. The next time the app is open, it asks whether to save a `.txt` debug log. Saved logs are written under the app's external documents folder in `FlipWordsLogs`, and the app shows the exact file path in a Toast.

@@ -68,6 +68,18 @@ class AiModelManager(context: Context) {
         return id
     }
 
+    fun deleteModel(): Boolean {
+        val downloadId = prefs.modelDownloadId
+        if (downloadId != AiLabPreferences.NO_DOWNLOAD_ID) {
+            runCatching { downloadManager.remove(downloadId) }
+        }
+
+        val deleted = modelFile().let { file -> !file.exists() || file.delete() }
+        prefs.modelDownloadId = AiLabPreferences.NO_DOWNLOAD_ID
+        prefs.modelStatus = AiLabPreferences.MODEL_NOT_DOWNLOADED
+        return deleted
+    }
+
     fun isReady(): Boolean = refreshStatus() == AiLabPreferences.MODEL_READY
 
     companion object {

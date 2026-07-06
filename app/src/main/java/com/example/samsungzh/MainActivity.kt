@@ -4,7 +4,10 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.TimePickerDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -14,10 +17,18 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.InputType
+import android.view.MotionEvent
 import android.view.Display
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.AlphaAnimation
+import android.view.animation.Animation
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.view.WindowInsets
 import android.widget.ImageView
@@ -25,6 +36,8 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.SeekBar
+import android.widget.Spinner
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import java.text.DateFormat
@@ -43,6 +56,15 @@ class MainActivity : Activity() {
     private lateinit var previewHanziView: TextView
     private lateinit var previewPinyinView: TextView
     private lateinit var previewEnglishView: TextView
+    private lateinit var overlayToggleButton: TextView
+    private lateinit var overlayPermissionButton: TextView
+    private lateinit var overlayPermissionContainer: LinearLayout
+    private lateinit var overlayStatusView: TextView
+    private lateinit var nextWordMetricView: TextView
+    private lateinit var bucketMetricView: TextView
+    private lateinit var frequencyMetricView: TextView
+    private lateinit var intervalStatusView: TextView
+    private lateinit var intervalChangeButton: TextView
     private lateinit var permissionStatusView: TextView
     private lateinit var rotationStatusView: TextView
     private lateinit var displayStatusView: TextView
@@ -52,15 +74,32 @@ class MainActivity : Activity() {
     private lateinit var aiSourceStatusView: TextView
     private lateinit var aiDownloadProgressBar: ProgressBar
     private lateinit var aiDownloadProgressView: TextView
+    private lateinit var aiGenerationProgressBar: ProgressBar
+    private lateinit var aiGenerationStatusView: TextView
+    private lateinit var aiModelActionButton: TextView
+    private lateinit var aiDeleteModelButton: TextView
+    private lateinit var aiGenerateButton: TextView
+    private lateinit var aiTimeButton: TextView
+    private lateinit var aiAlarmPermissionButton: TextView
+    private lateinit var aiDailySwitch: Switch
+    private lateinit var aiSourceButton: TextView
+    private lateinit var aiHskButton: TextView
+    private lateinit var aiModelPillView: TextView
+    private lateinit var aiPackPillView: TextView
+    private lateinit var learnSection: LinearLayout
+    private lateinit var styleSection: LinearLayout
+    private lateinit var aiLabSection: LinearLayout
+    private lateinit var deviceSection: LinearLayout
+    private val tabButtons = mutableMapOf<AppTab, TextView>()
+    private var activeTab = AppTab.LEARN
+    private var updatingUi = false
     private var aiFailurePromptShowing = false
+    private var lastRenderedHanzi: String? = null
 
     private val downloadProgressRunnable = object : Runnable {
         override fun run() {
             if (::aiDownloadProgressBar.isInitialized) {
                 render()
-                if (aiModelManager.downloadProgress().isDownloading) {
-                    handler.postDelayed(this, DOWNLOAD_PROGRESS_REFRESH_MILLIS)
-                }
             }
         }
     }
@@ -75,12 +114,14 @@ class MainActivity : Activity() {
         configureSystemBars()
         buildLayout()
         render()
+        maybePromptForAiFailureLog()
     }
 
     override fun onResume() {
         super.onResume()
         if (::permissionStatusView.isInitialized) {
             render()
+            maybePromptForAiFailureLog()
         }
     }
 
@@ -90,89 +131,122 @@ class MainActivity : Activity() {
     }
 
     private fun buildLayout() {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val root = FrameLayout(this).apply {
             setBackgroundColor(APP_BACKGROUND)
+            clipChildren = false
+            clipToPadding = false
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
             )
         }
         applySystemBarPadding(root)
 
+        val contentShell = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            clipChildren = false
+            clipToPadding = false
+        }
+        val contentRoot = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            clipChildren = false
+            clipToPadding = false
+            setPadding(0, dp(18), 0, dp(112))
+        }
         val scrollView = ScrollView(this).apply {
             setBackgroundColor(APP_BACKGROUND)
             isFillViewport = true
-            addView(root)
+            clipToPadding = false
+            addView(contentRoot)
         }
 
-        root.addView(buildHeroCard(), textLayoutParams())
-        root.addView(buildPreviewCard(), textLayoutParams(topMargin = 14))
-        root.addView(buildStyleCard(), textLayoutParams(topMargin = 14))
-        root.addView(buildTimingCard(), textLayoutParams(topMargin = 14))
-        root.addView(buildAiLabCard(), textLayoutParams(topMargin = 14))
-        root.addView(buildStatusCard(), textLayoutParams(topMargin = 14))
-        setContentView(scrollView)
+        contentShell.addView(buildTopAppBar(), textLayoutParams())
+
+        learnSection = sectionContainer().apply {
+            addView(buildHeroCard(), textLayoutParams())
+        }
+        styleSection = sectionContainer().apply {
+            addView(buildPreviewCard(), textLayoutParams())
+            addView(buildStyleCard(), textLayoutParams(topMargin = 16))
+            addView(buildTimingCard(), textLayoutParams(topMargin = 16))
+        }
+        aiLabSection = sectionContainer().apply {
+            addView(buildAiLabCard(), textLayoutParams())
+        }
+        deviceSection = sectionContainer().apply {
+            addView(buildStatusCard(), textLayoutParams())
+        }
+
+        contentRoot.addView(learnSection, textLayoutParams())
+        contentRoot.addView(styleSection, textLayoutParams())
+        contentRoot.addView(aiLabSection, textLayoutParams())
+        contentRoot.addView(deviceSection, textLayoutParams())
+        contentShell.addView(
+            scrollView,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
+            ),
+        )
+        root.addView(
+            contentShell,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        root.addView(
+            buildBottomNavigation(),
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+            ).apply {
+                leftMargin = dp(10)
+                rightMargin = dp(10)
+                bottomMargin = dp(12)
+            },
+        )
+        setContentView(root)
         root.requestApplyInsets()
+        updateVisibleSection()
     }
 
     private fun buildHeroCard(): LinearLayout {
         val card = card()
 
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        header.addView(
-            ImageView(this).apply {
-                setImageResource(R.drawable.flipwords_logo)
-                contentDescription = getString(R.string.app_name)
-                scaleType = ImageView.ScaleType.FIT_CENTER
+        card.addView(
+            TextView(this).apply {
+                text = "Today's word"
+                setTextColor(APP_TEXT_SECONDARY)
+                textSize = 14f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                includeFontPadding = false
             },
-            LinearLayout.LayoutParams(dp(54), dp(54)),
         )
-        header.addView(
-            LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), 0, 0, 0)
-                addView(
-                    TextView(this@MainActivity).apply {
-                        text = getString(R.string.app_name)
-                        setTextColor(APP_TEXT_PRIMARY)
-                        textSize = 24f
-                        typeface = Typeface.DEFAULT_BOLD
-                        includeFontPadding = false
-                    },
-                )
-                addView(
-                    TextView(this@MainActivity).apply {
-                        text = "Traditional Chinese on your Flip cover screen"
-                        setTextColor(APP_TEXT_SECONDARY)
-                        textSize = 15f
-                        setPadding(0, dp(6), 0, 0)
-                    },
-                )
-            },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-        )
-        card.addView(header)
 
         hanziView = TextView(this).apply {
             setTextColor(APP_TEXT_PRIMARY)
-            textSize = 82f
-            typeface = Typeface.DEFAULT_BOLD
+            textSize = 60f
+            gravity = Gravity.CENTER
+            typeface = Typeface.create(SERIF_FAMILY, Typeface.BOLD)
             includeFontPadding = false
-            setPadding(0, dp(24), 0, 0)
+            setPadding(0, dp(34), 0, 0)
         }
         pinyinView = TextView(this).apply {
             setTextColor(APP_TEXT_SECONDARY)
-            textSize = 26f
+            textSize = 22f
+            gravity = Gravity.CENTER
+            typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
             includeFontPadding = false
             setPadding(0, dp(10), 0, 0)
         }
         englishView = TextView(this).apply {
-            setTextColor(APP_ACCENT)
-            textSize = 30f
+            setTextColor(APP_PRIMARY)
+            textSize = 26f
+            gravity = Gravity.CENTER
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
             includeFontPadding = false
             setPadding(0, dp(14), 0, 0)
         }
@@ -180,31 +254,38 @@ class MainActivity : Activity() {
         card.addView(hanziView)
         card.addView(pinyinView)
         card.addView(englishView)
+        val metricsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(22), 0, 0)
+        }
+        nextWordMetricView = metricPill()
+        bucketMetricView = metricPill()
+        frequencyMetricView = metricPill()
+        metricsRow.addView(nextWordMetricView, weightedButtonLayoutParams())
+        metricsRow.addView(bucketMetricView, weightedButtonLayoutParams(startMargin = 8))
+        metricsRow.addView(frequencyMetricView, weightedButtonLayoutParams(startMargin = 8))
+        card.addView(metricsRow)
+        overlayStatusView = infoTextView().apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(18), 0, 0)
+        }
+        card.addView(overlayStatusView)
 
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(24), 0, 0)
+            setPadding(0, dp(30), 0, 0)
+        }
+        overlayToggleButton = actionButton(getString(R.string.overlay_start), primary = true, iconRes = R.drawable.ic_play).apply {
+            setOnClickListener { handleOverlayToggle() }
         }
         actions.addView(
-            actionButton(getString(R.string.overlay_start), primary = true).apply {
-                setOnClickListener {
-                    maybeRequestNotificationPermission()
-                    if (Settings.canDrawOverlays(this@MainActivity)) {
-                        startForegroundService(
-                            Intent(this@MainActivity, CoverOverlayService::class.java)
-                                .setAction(CoverOverlayActions.ACTION_START),
-                        )
-                    } else {
-                        startActivity(CoverOverlayService.permissionSettingsIntent(this@MainActivity))
-                    }
-                    render()
-                }
-            },
+            overlayToggleButton,
             weightedButtonLayoutParams(),
         )
         actions.addView(
-            actionButton(getString(R.string.refresh_word), primary = false),
+            actionButton(getString(R.string.refresh_word), primary = false, iconRes = R.drawable.ic_next),
             weightedButtonLayoutParams(startMargin = 10),
         )
         actions.getChildAt(1).setOnClickListener {
@@ -214,32 +295,24 @@ class MainActivity : Activity() {
         }
         card.addView(actions)
 
-        val secondaryActions = LinearLayout(this).apply {
+        overlayPermissionContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(10), 0, 0)
         }
-        secondaryActions.addView(
-            actionButton(getString(R.string.overlay_permission), primary = false).apply {
-                setOnClickListener {
-                    startActivity(CoverOverlayService.permissionSettingsIntent(this@MainActivity))
-                }
-            },
+        overlayPermissionButton = actionButton(
+            getString(R.string.overlay_permission),
+            primary = false,
+            iconRes = R.drawable.ic_permission,
+        ).apply {
+            setOnClickListener {
+                startActivity(CoverOverlayService.permissionSettingsIntent(this@MainActivity))
+            }
+        }
+        overlayPermissionContainer.addView(
+            overlayPermissionButton,
             textLayoutParams(),
         )
-        secondaryActions.addView(
-            actionButton(getString(R.string.overlay_stop), primary = false).apply {
-                setOnClickListener {
-                    overlayPreferences.overlayEnabled = false
-                    startService(
-                        Intent(this@MainActivity, CoverOverlayService::class.java)
-                            .setAction(CoverOverlayActions.ACTION_STOP),
-                    )
-                    render()
-                }
-            },
-            textLayoutParams(topMargin = 8),
-        )
-        card.addView(secondaryActions)
+        card.addView(overlayPermissionContainer)
 
         return card
     }
@@ -248,28 +321,32 @@ class MainActivity : Activity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = roundedBackground(PREVIEW_BACKGROUND, radius = 22)
-            setPadding(dp(18), dp(18), dp(18), dp(18))
+            applySoftElevation(this, CARD_ELEVATION_DP)
+            setPadding(dp(22), dp(22), dp(22), dp(22))
         }
         card.addView(
             TextView(this).apply {
                 text = "Overlay preview"
-                setTextColor(Color.WHITE)
+                setTextColor(APP_INVERSE_TEXT)
                 textSize = 17f
-                typeface = Typeface.DEFAULT_BOLD
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
             },
         )
 
         previewHanziView = TextView(this).apply {
             includeFontPadding = false
             setPadding(0, dp(18), 0, 0)
+            typeface = Typeface.create(SERIF_FAMILY, Typeface.BOLD)
         }
         previewPinyinView = TextView(this).apply {
             includeFontPadding = false
             setPadding(0, dp(6), 0, 0)
+            typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
         }
         previewEnglishView = TextView(this).apply {
             includeFontPadding = false
             setPadding(0, dp(6), 0, 0)
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
         }
         card.addView(previewHanziView)
         card.addView(previewPinyinView)
@@ -325,15 +402,30 @@ class MainActivity : Activity() {
         card.addView(sectionTextView("AI Lab"))
         card.addView(
             infoTextView().apply {
-                text = "Optional local generation with Google LiteRT-LM. The model is downloaded only when you choose it, and the built-in list stays available."
+                text = "Generate compact Traditional Mandarin vocabulary locally when you want a fresh pack."
             },
             textLayoutParams(topMargin = 10),
         )
+        val aiPillRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(14), 0, 0)
+        }
+        aiModelPillView = statusPill()
+        aiPackPillView = statusPill()
+        aiPillRow.addView(aiModelPillView, weightedButtonLayoutParams())
+        aiPillRow.addView(aiPackPillView, weightedButtonLayoutParams(startMargin = 8))
+        card.addView(aiPillRow)
 
         aiModelStatusView = infoTextView()
         aiDownloadProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progress = 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                progressTintList = ColorStateList.valueOf(APP_AMBER)
+                progressBackgroundTintList = ColorStateList.valueOf(APP_SURFACE_CONTAINER_HIGH)
+            }
+            minHeight = dp(8)
         }
         aiDownloadProgressView = infoTextView()
         aiGeneratedStatusView = infoTextView()
@@ -342,106 +434,87 @@ class MainActivity : Activity() {
         card.addView(aiModelStatusView, textLayoutParams(topMargin = 12))
         card.addView(aiDownloadProgressBar, textLayoutParams(topMargin = 8))
         card.addView(aiDownloadProgressView, textLayoutParams(topMargin = 4))
+        aiGenerationProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                indeterminateTintList = ColorStateList.valueOf(APP_AMBER)
+                progressBackgroundTintList = ColorStateList.valueOf(APP_SURFACE_CONTAINER_HIGH)
+            }
+            minHeight = dp(8)
+        }
+        aiGenerationStatusView = infoTextView()
+        card.addView(aiGenerationProgressBar, textLayoutParams(topMargin = 12))
+        card.addView(aiGenerationStatusView, textLayoutParams(topMargin = 6))
         card.addView(aiGeneratedStatusView, textLayoutParams(topMargin = 8))
         card.addView(aiSourceStatusView, textLayoutParams(topMargin = 8))
+
+        aiSourceButton = selectorButton("Source", aiLabPreferences.sourceMode.label, R.drawable.ic_source).apply {
+            setOnClickListener { showSourceModeDialog() }
+        }
+        card.addView(aiSourceButton, textLayoutParams(topMargin = 16))
+
+        aiHskButton = selectorButton("Level", aiLabPreferences.hskLevel.label, R.drawable.ic_level).apply {
+            setOnClickListener { showHskLevelDialog() }
+        }
+        card.addView(aiHskButton, textLayoutParams(topMargin = 8))
+
+        aiModelActionButton = actionButton("Download AI model", primary = false, iconRes = R.drawable.ic_download).apply {
+            setOnClickListener { handleModelAction() }
+        }
+        card.addView(aiModelActionButton, textLayoutParams(topMargin = 16))
+        aiGenerateButton = actionButton("Generate now", primary = true, iconRes = R.drawable.ic_sparkle).apply {
+            setOnClickListener {
+                maybeRequestNotificationPermission()
+                aiLabPreferences.generatedStatus = "${AiLabPreferences.GENERATED_RUNNING}: queued"
+                AiVocabularyGenerationWorker.enqueue(this@MainActivity)
+                render()
+            }
+        }
+        card.addView(aiGenerateButton, textLayoutParams(topMargin = 8))
+
+        aiTimeButton = actionButton("Daily time: ${formatGenerationTime()}", primary = false, iconRes = R.drawable.ic_clock).apply {
+            setOnClickListener { showGenerationTimePicker() }
+        }
+        card.addView(aiTimeButton, textLayoutParams(topMargin = 8))
+
+        val dailyRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundedBackground(APP_MUTED_SURFACE, radius = 18)
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            attachPressFeedback(this)
+        }
+        dailyRow.addView(
+            TextView(this).apply {
+                text = "Generate daily"
+                setTextColor(APP_TEXT_PRIMARY)
+                textSize = 15f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                setButtonIcon(this, R.drawable.ic_repeat, APP_SECONDARY_TEXT)
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        aiDailySwitch = Switch(this).apply {
+            isChecked = aiLabPreferences.dailyGenerationEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                if (!updatingUi) handleDailyToggle(isChecked)
+            }
+        }
+        dailyRow.addView(aiDailySwitch)
+        card.addView(dailyRow, textLayoutParams(topMargin = 8))
+
+        aiAlarmPermissionButton = actionButton("Alarm permission", primary = false, iconRes = R.drawable.ic_permission).apply {
+            setOnClickListener {
+                startActivity(AiGenerationScheduler.permissionIntent(this@MainActivity))
+            }
+        }
+        card.addView(aiAlarmPermissionButton, textLayoutParams(topMargin = 8))
+
         card.addView(aiScheduleStatusView, textLayoutParams(topMargin = 8))
-
-        card.addView(
-            actionButton("Download AI model", primary = false).apply {
-                setOnClickListener {
-                    aiModelManager.startDownload()
-                    render()
-                }
-            },
-            textLayoutParams(topMargin = 14),
-        )
-        card.addView(
-            actionButton("Generate now", primary = true).apply {
-                setOnClickListener {
-                    maybeRequestNotificationPermission()
-                    AiVocabularyGenerationWorker.enqueue(this@MainActivity)
-                    render()
-                }
-            },
-            textLayoutParams(topMargin = 8),
-        )
-        card.addView(
-            actionButton("Save AI debug log", primary = false).apply {
-                setOnClickListener {
-                    if (aiLabPreferences.pendingDebugLog.isBlank()) {
-                        Toast.makeText(
-                            this@MainActivity,
-                            "No AI failure log available yet.",
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    } else {
-                        showSaveAiLogPrompt(aiLabPreferences.lastFailureLogId)
-                    }
-                }
-            },
-            textLayoutParams(topMargin = 8),
-        )
-
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        aiDeleteModelButton = actionButton("Delete AI model", primary = false, iconRes = R.drawable.ic_delete).apply {
+            setOnClickListener { handleModelAction() }
         }
-        row.addView(
-            actionButton("Source", primary = false).apply {
-                setOnClickListener {
-                    aiLabPreferences.sourceMode = nextSourceMode(aiLabPreferences.sourceMode)
-                    repository.pinWord(repository.currentWord())
-                    refreshOverlay()
-                    render()
-                }
-            },
-            weightedButtonLayoutParams(),
-        )
-        row.addView(
-            actionButton("Time", primary = false).apply {
-                setOnClickListener { showGenerationTimePicker() }
-            },
-            weightedButtonLayoutParams(startMargin = 10),
-        )
-        card.addView(row, textLayoutParams(topMargin = 8))
-
-        val scheduleRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        scheduleRow.addView(
-            actionButton("Schedule daily", primary = false).apply {
-                setOnClickListener {
-                    if (AiGenerationScheduler.canScheduleExact(this@MainActivity)) {
-                        aiLabPreferences.dailyGenerationEnabled = true
-                        AiGenerationScheduler.scheduleNext(this@MainActivity)
-                    } else {
-                        startActivity(AiGenerationScheduler.permissionIntent(this@MainActivity))
-                    }
-                    render()
-                }
-            },
-            weightedButtonLayoutParams(),
-        )
-        scheduleRow.addView(
-            actionButton("Disable daily", primary = false).apply {
-                setOnClickListener {
-                    AiGenerationScheduler.cancel(this@MainActivity)
-                    render()
-                }
-            },
-            weightedButtonLayoutParams(startMargin = 10),
-        )
-        card.addView(scheduleRow, textLayoutParams(topMargin = 8))
-
-        card.addView(
-            actionButton("Alarm permission", primary = false).apply {
-                setOnClickListener {
-                    startActivity(AiGenerationScheduler.permissionIntent(this@MainActivity))
-                }
-            },
-            textLayoutParams(topMargin = 8),
-        )
+        card.addView(aiDeleteModelButton, textLayoutParams(topMargin = 18))
 
         return card
     }
@@ -455,6 +528,12 @@ class MainActivity : Activity() {
         card.addView(permissionStatusView, textLayoutParams(topMargin = 12))
         card.addView(rotationStatusView, textLayoutParams(topMargin = 10))
         card.addView(displayStatusView, textLayoutParams(topMargin = 10))
+        card.addView(
+            actionButton("Copy diagnostics", primary = false, iconRes = R.drawable.ic_copy).apply {
+                setOnClickListener { copyDeviceDiagnostics() }
+            },
+            textLayoutParams(topMargin = 14),
+        )
         return card
     }
 
@@ -462,9 +541,14 @@ class MainActivity : Activity() {
         val info = repository.rotationInfo()
         val word = info.currentWord
         val pinyin = PinyinToneFormatter.format(word)
+        val previousHanzi = lastRenderedHanzi
         hanziView.text = word.hanzi
         pinyinView.text = "[$pinyin]"
         englishView.text = word.english
+        if (previousHanzi != null && previousHanzi != word.hanzi) {
+            animateWordChange()
+        }
+        lastRenderedHanzi = word.hanzi
         previewHanziView.text = word.hanzi
         previewPinyinView.text = "[$pinyin]"
         previewEnglishView.text = word.english
@@ -474,6 +558,12 @@ class MainActivity : Activity() {
         previewHanziView.setTextColor(overlayPreferences.hanziColor)
         previewPinyinView.setTextColor(overlayPreferences.pinyinColor)
         previewEnglishView.setTextColor(overlayPreferences.englishColor)
+        nextWordMetricView.text =
+            "Next ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(info.nextRotationMillis))}"
+        bucketMetricView.text = "${repository.activeWords().size} words"
+        frequencyMetricView.text = formatInterval(info.intervalMillis / 1000L)
+        renderOverlayActions()
+        updateIntervalControls()
         permissionStatusView.text = overlayPermissionText()
         rotationStatusView.text =
             "Interval: ${formatInterval(info.intervalMillis / 1000L)}\nNext rotation: ${
@@ -483,36 +573,203 @@ class MainActivity : Activity() {
         renderAiLab()
     }
 
+    private fun renderOverlayActions() {
+        val hasOverlayPermission = Settings.canDrawOverlays(this)
+        val overlayEnabled = overlayPreferences.overlayEnabled
+        val buttonText = if (overlayEnabled) getString(R.string.overlay_stop) else getString(R.string.overlay_start)
+        val icon = if (overlayEnabled) R.drawable.ic_stop else R.drawable.ic_play
+        val background = if (overlayEnabled) APP_ERROR else APP_PRIMARY_CONTAINER
+
+        configureActionButton(
+            button = overlayToggleButton,
+            text = buttonText,
+            primary = true,
+            iconRes = icon,
+            backgroundColor = background,
+        )
+        overlayStatusView.text = when {
+            overlayEnabled -> "Overlay running on cover display when available."
+            hasOverlayPermission -> "Overlay ready. Tap Start to show it on the cover display."
+            else -> "Overlay permission needed before starting."
+        }
+        overlayPermissionContainer.visibility = if (hasOverlayPermission) View.GONE else View.VISIBLE
+    }
+
     private fun renderAiLab() {
         if (!::aiModelStatusView.isInitialized) return
 
+        updatingUi = true
         val modelStatus = aiModelManager.refreshStatus()
         val downloadProgress = aiModelManager.downloadProgress()
-        aiModelStatusView.text =
-            "$modelStatus\nModel: ${AiModelManager.MODEL_REPOSITORY}\nFile: ${AiModelManager.MODEL_FILE_NAME}"
+        val generating = isAiGenerating()
+        val modelReady = modelStatus == AiLabPreferences.MODEL_READY
+        val modelFailed = modelStatus == AiLabPreferences.MODEL_FAILED
+        val generatedFailed = aiLabPreferences.generatedStatus.startsWith(AiLabPreferences.GENERATED_FAILED)
+        val hasGeneratedPack = aiLabPreferences.generatedCount > 0
+
+        configureStatusPill(
+            pill = aiModelPillView,
+            text = MODEL_DISPLAY_NAME,
+            iconRes = R.drawable.ic_status_dot,
+            iconTint = when {
+                downloadProgress.isDownloading -> APP_AMBER
+                modelReady -> APP_SUCCESS
+                modelFailed -> APP_ERROR
+                else -> APP_BORDER
+            },
+            backgroundColor = when {
+                downloadProgress.isDownloading -> APP_AMBER_SURFACE
+                modelReady -> APP_SUCCESS_SURFACE
+                modelFailed -> APP_ERROR_CONTAINER
+                else -> APP_MUTED_SURFACE
+            },
+        )
+        configureStatusPill(
+            pill = aiPackPillView,
+            text = when {
+                generating -> "Generating"
+                hasGeneratedPack -> "${aiLabPreferences.generatedCount} entries"
+                else -> "Built-in list"
+            },
+            iconRes = when {
+                generating -> R.drawable.ic_sparkle
+                hasGeneratedPack -> R.drawable.ic_check
+                else -> R.drawable.ic_learn
+            },
+            iconTint = when {
+                generating -> APP_AMBER
+                hasGeneratedPack -> APP_SUCCESS
+                else -> APP_SECONDARY_TEXT
+            },
+            backgroundColor = when {
+                generating -> APP_AMBER_SURFACE
+                hasGeneratedPack -> APP_SUCCESS_SURFACE
+                else -> APP_MUTED_SURFACE
+            },
+        )
+        configureInfoLine(
+            view = aiModelStatusView,
+            text = when {
+                downloadProgress.isDownloading -> "Downloading $MODEL_DISPLAY_NAME · ${downloadProgress.percent}%"
+                modelReady -> "$MODEL_DISPLAY_NAME is available on this device."
+                modelFailed -> "$MODEL_DISPLAY_NAME download needs attention."
+                else -> "$MODEL_DISPLAY_NAME powers local vocabulary generation."
+            },
+            iconRes = when {
+                modelFailed -> R.drawable.ic_warning
+                modelReady -> R.drawable.ic_check
+                else -> R.drawable.ic_sparkle
+            },
+            iconTint = when {
+                modelFailed -> APP_ERROR
+                modelReady -> APP_SUCCESS
+                else -> APP_SECONDARY_TEXT
+            },
+        )
         aiDownloadProgressBar.progress = downloadProgress.percent
-        aiDownloadProgressBar.visibility = if (
-            downloadProgress.isDownloading ||
-            downloadProgress.status == AiLabPreferences.MODEL_READY
-        ) {
-            View.VISIBLE
-        } else {
-            View.GONE
-        }
+        aiDownloadProgressBar.visibility = if (downloadProgress.isDownloading) View.VISIBLE else View.GONE
         aiDownloadProgressView.text =
-            "Download: ${downloadProgress.percent}% (${formatBytes(downloadProgress.downloadedBytes)} / ${formatBytes(downloadProgress.totalBytes)})"
+            "${downloadProgress.percent}% · ${formatBytes(downloadProgress.downloadedBytes)} of ${formatBytes(downloadProgress.totalBytes)}"
         aiDownloadProgressView.visibility = aiDownloadProgressBar.visibility
-        updateDownloadProgressLoop(downloadProgress.isDownloading)
-        aiGeneratedStatusView.text =
-            "${aiLabPreferences.generatedStatus}\nEntries: ${aiLabPreferences.generatedCount}\nLast run: ${formatOptionalTime(aiLabPreferences.lastGenerationMillis)}"
-        aiSourceStatusView.text =
-            "Active source: ${aiLabPreferences.sourceMode.label}\nCurrent active bucket: ${repository.activeWords().size} entries"
+        aiGenerationProgressBar.visibility = if (generating) View.VISIBLE else View.GONE
+        aiGenerationStatusView.visibility = if (generating) View.VISIBLE else View.GONE
+        configureInfoLine(
+            view = aiGenerationStatusView,
+            text = "Building vocabulary${animatedDots()} ${generationStepLabel(aiLabPreferences.generatedStatus)}",
+            iconRes = R.drawable.ic_sparkle,
+            iconTint = APP_AMBER,
+        )
+        configureInfoLine(
+            view = aiGeneratedStatusView,
+            text = when {
+                generatedFailed -> "Last generation failed. Recovery log appears when you reopen the app."
+                hasGeneratedPack -> "Last updated ${formatOptionalTime(aiLabPreferences.lastGenerationMillis)}"
+                else -> "Generate a local pack when you want fresh practice."
+            },
+            iconRes = when {
+                generatedFailed -> R.drawable.ic_warning
+                hasGeneratedPack -> R.drawable.ic_check
+                else -> R.drawable.ic_next
+            },
+            iconTint = when {
+                generatedFailed -> APP_ERROR
+                hasGeneratedPack -> APP_SUCCESS
+                else -> APP_SECONDARY_TEXT
+            },
+        )
+        configureInfoLine(
+            view = aiSourceStatusView,
+            text = "Active vocabulary: ${repository.activeWords().size} words",
+            iconRes = R.drawable.ic_source,
+            iconTint = APP_SECONDARY_TEXT,
+        )
+        configureSelectorButton(aiSourceButton, "Source", aiLabPreferences.sourceMode.label, R.drawable.ic_source)
+        configureSelectorButton(aiHskButton, "Level", aiLabPreferences.hskLevel.label, R.drawable.ic_level)
+        configureActionButton(
+            button = aiModelActionButton,
+            text = when {
+                downloadProgress.isDownloading -> "Downloading ${downloadProgress.percent}%"
+                modelFailed -> "Retry download"
+                else -> "Download AI model"
+            },
+            primary = false,
+            iconRes = R.drawable.ic_download,
+        )
+        aiModelActionButton.visibility = if (modelReady) View.GONE else View.VISIBLE
+        aiModelActionButton.isEnabled = !downloadProgress.isDownloading && !generating
+        aiModelActionButton.alpha = if (aiModelActionButton.isEnabled) 1f else 0.55f
+        configureActionButton(
+            button = aiGenerateButton,
+            text = when {
+                generating -> "Generating..."
+                modelReady -> "Generate 50 words"
+                else -> "Download model first"
+            },
+            primary = true,
+            iconRes = R.drawable.ic_sparkle,
+        )
+        aiGenerateButton.isEnabled = modelReady && !generating
+        aiGenerateButton.alpha = if (aiGenerateButton.isEnabled) 1f else 0.55f
+        configureActionButton(
+            button = aiTimeButton,
+            text = "Daily ${formatGenerationTime()}",
+            primary = false,
+            iconRes = R.drawable.ic_clock,
+        )
+        aiSourceButton.isEnabled = !generating
+        aiSourceButton.alpha = if (generating) 0.55f else 1f
+        aiHskButton.isEnabled = !generating
+        aiHskButton.alpha = if (generating) 0.55f else 1f
 
         val exactStatus = if (AiGenerationScheduler.canScheduleExact(this)) "granted" else "blocked"
         val enabled = if (aiLabPreferences.dailyGenerationEnabled) "enabled" else "off"
-        aiScheduleStatusView.text =
-            "Daily generation: $enabled at ${formatGenerationTime()}\nExact alarm permission: $exactStatus\nNext scheduled: ${formatOptionalTime(aiLabPreferences.lastScheduledGenerationMillis)}"
-        maybePromptForAiFailureLog()
+        aiDailySwitch.setOnCheckedChangeListener(null)
+        aiDailySwitch.isChecked = aiLabPreferences.dailyGenerationEnabled
+        aiDailySwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (!updatingUi) handleDailyToggle(isChecked)
+        }
+        aiAlarmPermissionButton.visibility = if (exactStatus == "granted") View.GONE else View.VISIBLE
+        configureInfoLine(
+            view = aiScheduleStatusView,
+            text = "Daily $enabled · ${formatGenerationTime()} · next ${formatOptionalTime(aiLabPreferences.lastScheduledGenerationMillis)}",
+            iconRes = R.drawable.ic_repeat,
+            iconTint = APP_SECONDARY_TEXT,
+        )
+        configureActionButton(
+            button = aiDeleteModelButton,
+            text = "Delete AI model",
+            primary = false,
+            iconRes = R.drawable.ic_delete,
+            backgroundColor = APP_ERROR_CONTAINER,
+            textColor = APP_ON_ERROR_CONTAINER,
+        )
+        aiDeleteModelButton.visibility = if (modelReady) View.VISIBLE else View.GONE
+        aiDeleteModelButton.isEnabled = !generating
+        aiDeleteModelButton.alpha = if (aiDeleteModelButton.isEnabled) 1f else 0.55f
+        setSubtlePulse(aiModelPillView, modelReady)
+        setSubtlePulse(aiPackPillView, generating)
+        updatingUi = false
+        updateActivityLoop(downloadProgress.isDownloading || generating)
     }
 
     private fun overlayPermissionText(): String =
@@ -574,6 +831,11 @@ class MainActivity : Activity() {
         val seekBar = SeekBar(this).apply {
             this.max = max - min
             progress = current - min
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                progressTintList = ColorStateList.valueOf(APP_AMBER)
+                progressBackgroundTintList = ColorStateList.valueOf(APP_SURFACE_CONTAINER_HIGH)
+                thumbTintList = ColorStateList.valueOf(APP_AMBER)
+            }
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     val value = min + progress
@@ -607,7 +869,7 @@ class MainActivity : Activity() {
                 text = "Saved colors"
                 setTextColor(APP_TEXT_SECONDARY)
                 textSize = 13f
-                typeface = Typeface.DEFAULT_BOLD
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
             },
         )
         val row = LinearLayout(this).apply {
@@ -645,36 +907,13 @@ class MainActivity : Activity() {
     }
 
     private fun addIntervalControl(root: LinearLayout) {
-        val label = infoTextView()
-        val min = OverlayPreferences.MIN_ROTATION_INTERVAL_SECONDS
-        val max = OverlayPreferences.MAX_ROTATION_INTERVAL_SECONDS
-        val step = OverlayPreferences.ROTATION_INTERVAL_STEP_SECONDS
-        val seekBar = SeekBar(this).apply {
-            this.max = (max - min) / step
-            progress = (overlayPreferences.rotationIntervalSeconds - min) / step
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    val value = min + (progress * step)
-                    label.text = "Word change frequency: ${formatInterval(value.toLong())}"
-                    if (fromUser) {
-                        val currentWord = repository.currentWord()
-                        overlayPreferences.rotationIntervalSeconds = value
-                        repository.pinWord(currentWord)
-                        WordUpdateScheduler.schedule(this@MainActivity)
-                        refreshOverlay()
-                        render()
-                    }
-                }
-
-                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-
-                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-            })
+        intervalStatusView = infoTextView()
+        root.addView(intervalStatusView, textLayoutParams(topMargin = 14))
+        intervalChangeButton = actionButton("Change frequency", primary = false, iconRes = R.drawable.ic_clock).apply {
+            setOnClickListener { showIntervalOptionsDialog() }
         }
-
-        label.text = "Word change frequency: ${formatInterval(overlayPreferences.rotationIntervalSeconds.toLong())}"
-        root.addView(label, textLayoutParams(topMargin = 14))
-        root.addView(seekBar, textLayoutParams(topMargin = 4))
+        root.addView(intervalChangeButton, textLayoutParams(topMargin = 12))
+        updateIntervalControls()
     }
 
     private fun showGenerationTimePicker() {
@@ -692,6 +931,139 @@ class MainActivity : Activity() {
             aiLabPreferences.dailyGenerationMinute,
             true,
         ).show()
+    }
+
+    private fun showSourceModeDialog() {
+        val modes = AiVocabularySourceMode.values()
+        val labels = modes.map { it.label }.toTypedArray()
+        val selected = modes.indexOf(aiLabPreferences.sourceMode)
+
+        AlertDialog.Builder(this)
+            .setTitle("Generated source")
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                dialog.dismiss()
+                aiLabPreferences.sourceMode = modes[which]
+                repository.pinWord(repository.currentWord())
+                refreshOverlay()
+                render()
+            }
+            .show()
+    }
+
+    private fun showHskLevelDialog() {
+        val levels = AiHskLevel.entries
+        val labels = levels.map { it.label }.toTypedArray()
+        val selected = levels.indexOf(aiLabPreferences.hskLevel)
+
+        AlertDialog.Builder(this)
+            .setTitle("HSK level")
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                dialog.dismiss()
+                aiLabPreferences.hskLevel = levels[which]
+                render()
+            }
+            .show()
+    }
+
+    private fun updateIntervalControls() {
+        if (!::intervalStatusView.isInitialized) return
+
+        val current = overlayPreferences.rotationIntervalSeconds
+        intervalStatusView.text = "Changes every ${formatInterval(current.toLong())}"
+        if (::intervalChangeButton.isInitialized) {
+            configureActionButton(
+                button = intervalChangeButton,
+                text = "Change frequency",
+                primary = false,
+                iconRes = R.drawable.ic_clock,
+            )
+        }
+    }
+
+    private fun showIntervalOptionsDialog() {
+        val presets = listOf(
+            IntervalPreset("5 sec", 5),
+            IntervalPreset("1 min", 60),
+            IntervalPreset("15 min", 15 * 60),
+            IntervalPreset("30 min", 30 * 60),
+            IntervalPreset("60 min", 60 * 60),
+            IntervalPreset("90 min", 90 * 60),
+        )
+        val labels = presets.map { it.label } + "Custom..."
+        val currentIndex = presets.indexOfFirst { it.seconds == overlayPreferences.rotationIntervalSeconds }
+
+        AlertDialog.Builder(this)
+            .setTitle("Change word every")
+            .setSingleChoiceItems(labels.toTypedArray(), currentIndex) { dialog, which ->
+                dialog.dismiss()
+                if (which < presets.size) {
+                    setRotationInterval(presets[which].seconds)
+                } else {
+                    showCustomIntervalDialog()
+                }
+            }
+            .show()
+    }
+
+    private fun showCustomIntervalDialog() {
+        val units = listOf("seconds", "minutes", "hours")
+        val currentSeconds = overlayPreferences.rotationIntervalSeconds
+        val defaultUnitIndex = when {
+            currentSeconds % 3600 == 0 && currentSeconds >= 3600 -> 2
+            currentSeconds % 60 == 0 && currentSeconds >= 60 -> 1
+            else -> 0
+        }
+        val defaultValue = when (defaultUnitIndex) {
+            2 -> currentSeconds / 3600
+            1 -> currentSeconds / 60
+            else -> currentSeconds
+        }
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(defaultValue.toString())
+            selectAll()
+            setPadding(dp(12), 0, dp(12), 0)
+            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 16, strokeColor = APP_OUTLINE_VARIANT)
+            minHeight = dp(52)
+        }
+        val unitSpinner = spinner(
+            labels = units,
+            selectedIndex = defaultUnitIndex,
+            onSelected = {},
+        )
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, 0)
+            addView(
+                input,
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(
+                unitSpinner,
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = dp(10)
+                },
+            )
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Change word every")
+            .setView(row)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Done") { _, _ ->
+                val value = input.text.toString().toIntOrNull() ?: return@setPositiveButton
+                val multiplier = when (unitSpinner.selectedItemPosition) {
+                    2 -> 3600
+                    1 -> 60
+                    else -> 1
+                }
+                val totalSeconds = (value.toLong() * multiplier.toLong())
+                    .coerceAtMost(Int.MAX_VALUE.toLong())
+                    .toInt()
+                setRotationInterval(totalSeconds)
+            }
+            .show()
     }
 
     private fun maybePromptForAiFailureLog() {
@@ -747,11 +1119,6 @@ class MainActivity : Activity() {
         ).show()
     }
 
-    private fun nextSourceMode(current: AiVocabularySourceMode): AiVocabularySourceMode {
-        val modes = AiVocabularySourceMode.values()
-        return modes[(modes.indexOf(current) + 1) % modes.size]
-    }
-
     private fun formatGenerationTime(): String =
         String.format(Locale.US, "%02d:%02d", aiLabPreferences.dailyGenerationHour, aiLabPreferences.dailyGenerationMinute)
 
@@ -762,10 +1129,278 @@ class MainActivity : Activity() {
             DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(millis))
         }
 
-    private fun updateDownloadProgressLoop(isDownloading: Boolean) {
+    private fun updateActivityLoop(shouldRefresh: Boolean) {
         handler.removeCallbacks(downloadProgressRunnable)
-        if (isDownloading) {
+        if (shouldRefresh) {
             handler.postDelayed(downloadProgressRunnable, DOWNLOAD_PROGRESS_REFRESH_MILLIS)
+        }
+    }
+
+    private fun handleModelAction() {
+        if (aiModelManager.refreshStatus() == AiLabPreferences.MODEL_READY) {
+            val deleted = aiModelManager.deleteModel()
+            Toast.makeText(
+                this,
+                if (deleted) "AI model deleted." else "Could not delete AI model.",
+                Toast.LENGTH_SHORT,
+            ).show()
+        } else {
+            aiModelManager.startDownload()
+        }
+        render()
+    }
+
+    private fun handleOverlayToggle() {
+        if (overlayPreferences.overlayEnabled) {
+            overlayPreferences.overlayEnabled = false
+            startService(
+                Intent(this, CoverOverlayService::class.java)
+                    .setAction(CoverOverlayActions.ACTION_STOP),
+            )
+            Toast.makeText(this, "Overlay stopped.", Toast.LENGTH_SHORT).show()
+        } else {
+            maybeRequestNotificationPermission()
+            if (Settings.canDrawOverlays(this)) {
+                overlayPreferences.overlayEnabled = true
+                startForegroundService(
+                    Intent(this, CoverOverlayService::class.java)
+                        .setAction(CoverOverlayActions.ACTION_START),
+                )
+                Toast.makeText(this, "Overlay starting.", Toast.LENGTH_SHORT).show()
+            } else {
+                startActivity(CoverOverlayService.permissionSettingsIntent(this))
+            }
+        }
+        render()
+    }
+
+    private fun copyDeviceDiagnostics() {
+        val text = listOf(
+            permissionStatusView.text,
+            rotationStatusView.text,
+            displayStatusView.text,
+        ).joinToString(separator = "\n\n")
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText("FlipWords diagnostics", text))
+        Toast.makeText(this, "Diagnostics copied.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun handleDailyToggle(enabled: Boolean) {
+        if (enabled) {
+            if (AiGenerationScheduler.canScheduleExact(this)) {
+                aiLabPreferences.dailyGenerationEnabled = true
+                AiGenerationScheduler.scheduleNext(this)
+            } else {
+                aiLabPreferences.dailyGenerationEnabled = false
+                startActivity(AiGenerationScheduler.permissionIntent(this))
+            }
+        } else {
+            AiGenerationScheduler.cancel(this)
+        }
+        render()
+    }
+
+    private fun animateWordChange() {
+        listOf(hanziView, pinyinView, englishView).forEachIndexed { index, view ->
+            view.alpha = 0f
+            view.translationY = dp(8).toFloat()
+            view.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setStartDelay(index * 45L)
+                .setDuration(180L)
+                .start()
+        }
+    }
+
+    private fun setRotationInterval(seconds: Int) {
+        val min = OverlayPreferences.MIN_ROTATION_INTERVAL_SECONDS
+        val max = OverlayPreferences.MAX_ROTATION_INTERVAL_SECONDS
+        val normalized = seconds.coerceIn(min, max)
+        val currentWord = repository.currentWord()
+        overlayPreferences.rotationIntervalSeconds = normalized
+        repository.pinWord(currentWord)
+        WordUpdateScheduler.schedule(this)
+        refreshOverlay()
+        if (normalized != seconds) {
+            Toast.makeText(
+                this,
+                "Frequency adjusted to ${formatInterval(normalized.toLong())}.",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+        render()
+    }
+
+    private fun isAiGenerating(): Boolean =
+        aiLabPreferences.generatedStatus.startsWith(AiLabPreferences.GENERATED_RUNNING)
+
+    private fun animatedDots(): String =
+        ".".repeat(((System.currentTimeMillis() / DOWNLOAD_PROGRESS_REFRESH_MILLIS) % 4).toInt())
+
+    private fun generationStepLabel(status: String): String =
+        when {
+            status.contains("loading model", ignoreCase = true) -> "Loading model"
+            status.contains("validating", ignoreCase = true) -> "Validating entries"
+            status.contains("queued", ignoreCase = true) -> "Queued"
+            status.contains("checking model", ignoreCase = true) -> "Checking model"
+            else -> "Preparing"
+        }
+
+    private fun formLabel(text: String): TextView =
+        TextView(this).apply {
+            this.text = text
+            setTextColor(APP_TEXT_SECONDARY)
+            textSize = 13f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            includeFontPadding = false
+        }
+
+    private fun spinner(labels: List<String>, selectedIndex: Int, onSelected: (Int) -> Unit): Spinner =
+        Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_item,
+                labels,
+            ).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 18, strokeColor = APP_OUTLINE_VARIANT)
+            setPadding(dp(12), 0, dp(12), 0)
+            minimumHeight = dp(52)
+            setSelection(selectedIndex.coerceIn(labels.indices), false)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    onSelected(position)
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            }
+        }
+
+    private fun buildTopAppBar(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = getString(R.string.app_name)
+                            setTextColor(APP_TEXT_PRIMARY)
+                            textSize = 28f
+                            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                            includeFontPadding = false
+                        },
+                    )
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = "Cover-screen Chinese practice"
+                            setTextColor(APP_TEXT_SECONDARY)
+                            textSize = 13f
+                            includeFontPadding = false
+                            setPadding(0, dp(6), 0, 0)
+                        },
+                    )
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(
+                ImageView(this@MainActivity).apply {
+                    setImageResource(R.drawable.flipwords_logo)
+                    contentDescription = getString(R.string.app_name)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    background = roundedBackground(APP_SURFACE, radius = 18)
+                    setPadding(dp(6), dp(6), dp(6), dp(6))
+                },
+                LinearLayout.LayoutParams(dp(48), dp(48)),
+            )
+        }
+
+    private fun buildBottomNavigation(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            clipChildren = false
+            clipToPadding = false
+            background = roundedStrokeBackground(APP_SURFACE, radius = 32, strokeColor = APP_OUTLINE_VARIANT)
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            applySoftElevation(this, NAV_ELEVATION_DP)
+            AppTab.values().forEach { tab ->
+                addView(
+                    tabButton(tab),
+                    LinearLayout.LayoutParams(
+                        0,
+                        dp(56),
+                        1f,
+                    ).apply {
+                        marginEnd = if (tab == AppTab.values().last()) 0 else dp(4)
+                    },
+                )
+            }
+        }
+
+    private fun tabButton(tab: AppTab): TextView =
+        TextView(this).apply {
+            text = tab.title
+            contentDescription = tab.title
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            includeFontPadding = false
+            textSize = 11f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            setPadding(dp(6), dp(5), dp(6), dp(4))
+            attachPressFeedback(this)
+            setOnClickListener {
+                if (activeTab == tab) return@setOnClickListener
+                activeTab = tab
+                updateVisibleSection(animate = true)
+                render()
+            }
+            tabButtons[tab] = this
+        }
+
+    private fun updateVisibleSection(animate: Boolean = false) {
+        if (!::learnSection.isInitialized) return
+
+        val activeSection = when (activeTab) {
+            AppTab.LEARN -> learnSection
+            AppTab.STYLE -> styleSection
+            AppTab.AI_LAB -> aiLabSection
+            AppTab.DEVICE -> deviceSection
+        }
+        listOf(learnSection, styleSection, aiLabSection, deviceSection).forEach { section ->
+            section.visibility = if (section == activeSection) View.VISIBLE else View.GONE
+        }
+        if (animate) {
+            activeSection.alpha = 0f
+            activeSection.translationY = dp(8).toFloat()
+            activeSection.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(180L)
+                .start()
+        }
+        updateTabStyles()
+    }
+
+    private fun updateTabStyles() {
+        tabButtons.forEach { (tab, button) ->
+            val selected = tab == activeTab
+            val tint = if (selected) APP_PRIMARY else APP_TEXT_SECONDARY
+            button.setTextColor(tint)
+            button.alpha = if (selected) 1f else 0.74f
+            button.typeface = Typeface.create(SANS_FAMILY, if (selected) Typeface.BOLD else Typeface.NORMAL)
+            button.background = roundedBackground(if (selected) APP_SUCCESS_SURFACE else Color.TRANSPARENT, radius = 26)
+            setTopButtonIcon(button, tab.iconRes, tint)
+            button.animate()
+                .scaleX(if (selected) 1f else 0.96f)
+                .scaleY(if (selected) 1f else 0.96f)
+                .translationZ(if (selected) dp(1).toFloat() else 0f)
+                .setDuration(160L)
+                .start()
         }
     }
 
@@ -804,55 +1439,153 @@ class MainActivity : Activity() {
     private fun card(): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = roundedBackground(APP_SURFACE, radius = 22)
-            elevation = dp(1).toFloat()
-            setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = roundedStrokeBackground(APP_SURFACE, radius = 30, strokeColor = APP_OUTLINE_VARIANT)
+            applySoftElevation(this, CARD_ELEVATION_DP)
+            setPadding(dp(22), dp(22), dp(22), dp(22))
         }
 
-    private fun actionButton(text: String, primary: Boolean): TextView =
+    private fun actionButton(text: String, primary: Boolean, iconRes: Int? = null): TextView =
         TextView(this).apply {
-            this.text = text
             gravity = Gravity.CENTER
             isClickable = true
             isFocusable = true
             textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
             includeFontPadding = false
-            setTextColor(if (primary) Color.WHITE else APP_TEXT_PRIMARY)
-            background = roundedBackground(if (primary) APP_ACCENT else APP_MUTED_SURFACE, radius = 16)
-            setPadding(dp(14), dp(8), dp(14), dp(8))
-            minHeight = dp(42)
+            setPadding(dp(18), dp(10), dp(18), dp(10))
+            minHeight = dp(56)
             minWidth = 0
+            configureActionButton(this, text, primary, iconRes)
+            attachPressFeedback(this)
         }
+
+    private fun selectorButton(label: String, value: String, iconRes: Int): TextView =
+        TextView(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            textSize = 15f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            includeFontPadding = false
+            setPadding(dp(16), 0, dp(16), 0)
+            minHeight = dp(56)
+            configureSelectorButton(this, label, value, iconRes)
+            attachPressFeedback(this)
+        }
+
+    private fun configureSelectorButton(button: TextView, label: String, value: String, iconRes: Int) {
+        button.text = "$label: $value"
+        button.setTextColor(APP_TEXT_PRIMARY)
+        button.background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 20, strokeColor = APP_OUTLINE_VARIANT)
+        setButtonIcon(button, iconRes, APP_SECONDARY_TEXT)
+    }
+
+    private fun configureActionButton(
+        button: TextView,
+        text: String,
+        primary: Boolean,
+        iconRes: Int? = null,
+        backgroundColor: Int = if (primary) APP_PRIMARY_CONTAINER else APP_SECONDARY_CONTAINER,
+        textColor: Int = if (primary) APP_ON_PRIMARY else APP_SECONDARY_TEXT,
+    ) {
+        button.text = text
+        button.setTextColor(textColor)
+        button.background = roundedBackground(backgroundColor, radius = 28)
+        setButtonIcon(button, iconRes, textColor)
+    }
+
+    private fun setButtonIcon(button: TextView, iconRes: Int?, color: Int) {
+        val icon = iconRes?.let { getDrawable(it)?.mutate() }
+        icon?.setTint(color)
+        button.compoundDrawablePadding = if (icon == null) 0 else dp(8)
+        button.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null)
+    }
+
+    private fun setTopButtonIcon(button: TextView, iconRes: Int, color: Int) {
+        val icon = getDrawable(iconRes)?.mutate()
+        icon?.setTint(color)
+        button.compoundDrawablePadding = dp(2)
+        button.setCompoundDrawablesWithIntrinsicBounds(null, icon, null, null)
+    }
 
     private fun infoTextView(): TextView =
         TextView(this).apply {
             setTextColor(APP_TEXT_SECONDARY)
-            textSize = 15f
+            textSize = 14f
             includeFontPadding = true
+            typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
         }
 
     private fun sectionTextView(text: String): TextView =
         TextView(this).apply {
             this.text = text
             setTextColor(APP_TEXT_PRIMARY)
-            textSize = 18f
-            typeface = Typeface.DEFAULT_BOLD
+            textSize = 22f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
             includeFontPadding = true
         }
+
+    private fun metricPill(): TextView =
+        TextView(this).apply {
+            gravity = Gravity.CENTER
+            setTextColor(APP_SECONDARY_TEXT)
+            textSize = 12f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            includeFontPadding = false
+            minHeight = dp(36)
+            background = roundedBackground(APP_MUTED_SURFACE, radius = 18)
+            setPadding(dp(8), 0, dp(8), 0)
+        }
+
+    private fun statusPill(): TextView =
+        TextView(this).apply {
+            gravity = Gravity.CENTER
+            setTextColor(APP_PRIMARY)
+            textSize = 12f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            includeFontPadding = false
+            minHeight = dp(38)
+            background = roundedBackground(APP_SUCCESS_SURFACE, radius = 19)
+            setPadding(dp(8), 0, dp(8), 0)
+        }
+
+    private fun configureStatusPill(
+        pill: TextView,
+        text: String,
+        iconRes: Int,
+        iconTint: Int,
+        backgroundColor: Int,
+    ) {
+        pill.text = text
+        pill.setTextColor(APP_TEXT_PRIMARY)
+        pill.background = roundedBackground(backgroundColor, radius = 19)
+        setButtonIcon(pill, iconRes, iconTint)
+        pill.elevation = if (backgroundColor == APP_SUCCESS_SURFACE) dp(1).toFloat() else 0f
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && backgroundColor == APP_SUCCESS_SURFACE) {
+            pill.outlineAmbientShadowColor = APP_SUCCESS_GLOW
+            pill.outlineSpotShadowColor = APP_SUCCESS_GLOW
+        }
+    }
+
+    private fun configureInfoLine(view: TextView, text: String, iconRes: Int, iconTint: Int) {
+        view.text = text
+        view.setTextColor(if (iconTint == APP_ERROR) APP_ON_ERROR_CONTAINER else APP_TEXT_SECONDARY)
+        setButtonIcon(view, iconRes, iconTint)
+    }
 
     private fun swatchView(color: Int, sizeDp: Int): TextView =
         TextView(this).apply {
             background = swatchBackground(color, selected = true)
             minWidth = dp(sizeDp)
             minHeight = dp(sizeDp)
+            attachPressFeedback(this)
         }
 
     private fun swatchBackground(color: Int, selected: Boolean): GradientDrawable =
         GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(color)
-            setStroke(dp(if (selected) 3 else 1), if (selected) APP_ACCENT else APP_BORDER)
+            setStroke(dp(if (selected) 3 else 1), if (selected) APP_AMBER else APP_BORDER)
         }
 
     private fun roundedBackground(color: Int, radius: Int): GradientDrawable =
@@ -861,6 +1594,70 @@ class MainActivity : Activity() {
             cornerRadius = dp(radius).toFloat()
             setColor(color)
         }
+
+    private fun roundedStrokeBackground(color: Int, radius: Int, strokeColor: Int): GradientDrawable =
+        roundedBackground(color, radius).apply {
+            setStroke(dp(1), strokeColor)
+        }
+
+    private fun applySoftElevation(view: View, elevationDp: Int) {
+        view.elevation = dp(elevationDp).toFloat()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            view.outlineAmbientShadowColor = APP_SHADOW
+            view.outlineSpotShadowColor = APP_SHADOW
+        }
+    }
+
+    private fun sectionContainer(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            clipChildren = false
+            clipToPadding = false
+        }
+
+    private fun attachPressFeedback(view: View) {
+        view.setOnTouchListener { touchedView, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    touchedView.animate()
+                        .scaleX(0.97f)
+                        .scaleY(0.97f)
+                        .alpha(0.88f)
+                        .translationZ(dp(2).toFloat())
+                        .setDuration(90L)
+                        .start()
+                }
+
+                MotionEvent.ACTION_UP,
+                MotionEvent.ACTION_CANCEL -> {
+                    touchedView.animate()
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .alpha(1f)
+                        .translationZ(0f)
+                        .setDuration(140L)
+                        .start()
+                }
+            }
+            false
+        }
+    }
+
+    private fun setSubtlePulse(view: View, active: Boolean) {
+        if (active) {
+            if (view.animation == null) {
+                val pulse = AlphaAnimation(0.72f, 1f).apply {
+                    duration = 900L
+                    repeatMode = Animation.REVERSE
+                    repeatCount = Animation.INFINITE
+                }
+                view.startAnimation(pulse)
+            }
+        } else {
+            view.clearAnimation()
+            view.alpha = 1f
+        }
+    }
 
     private fun weightedButtonLayoutParams(startMargin: Int = 0): LinearLayout.LayoutParams =
         LinearLayout.LayoutParams(
@@ -927,31 +1724,62 @@ class MainActivity : Activity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    private enum class AppTab(val title: String, val iconRes: Int) {
+        LEARN("Learn", R.drawable.ic_learn),
+        STYLE("Style", R.drawable.ic_style),
+        AI_LAB("AI Lab", R.drawable.ic_sparkle),
+        DEVICE("Device", R.drawable.ic_device),
+    }
+
+    private data class IntervalPreset(val label: String, val seconds: Int)
+
     companion object {
         private const val REQUEST_POST_NOTIFICATIONS = 42
         private const val DOWNLOAD_PROGRESS_REFRESH_MILLIS = 1_000L
+        private const val CARD_ELEVATION_DP = 2
+        private const val NAV_ELEVATION_DP = 8
 
-        private val APP_BACKGROUND = Color.parseColor("#F5F6F8")
-        private val APP_SURFACE = Color.WHITE
-        private val APP_MUTED_SURFACE = Color.parseColor("#EEF1F5")
-        private val PREVIEW_BACKGROUND = Color.parseColor("#111214")
-        private val APP_TEXT_PRIMARY = Color.parseColor("#20242A")
-        private val APP_TEXT_SECONDARY = Color.parseColor("#66717F")
-        private val APP_BORDER = Color.parseColor("#D6DCE3")
-        private val APP_ACCENT = Color.parseColor("#7F56D9")
+        private const val SANS_FAMILY = "sans-serif"
+        private const val SERIF_FAMILY = "serif"
+        private const val MODEL_DISPLAY_NAME = "Gemma 4 E2B"
+
+        private val APP_BACKGROUND = Color.parseColor("#F7FAF7")
+        private val APP_SURFACE = Color.parseColor("#FFFFFF")
+        private val APP_MUTED_SURFACE = Color.parseColor("#F1F4F1")
+        private val APP_SURFACE_CONTAINER_HIGH = Color.parseColor("#E5E9E6")
+        private val PREVIEW_BACKGROUND = Color.parseColor("#2D3130")
+        private val APP_TEXT_PRIMARY = Color.parseColor("#181C1B")
+        private val APP_TEXT_SECONDARY = Color.parseColor("#3E4945")
+        private val APP_INVERSE_TEXT = Color.parseColor("#EEF2EE")
+        private val APP_OUTLINE_VARIANT = Color.parseColor("#BEC9C4")
+        private val APP_BORDER = Color.parseColor("#6E7975")
+        private val APP_PRIMARY = Color.parseColor("#005344")
+        private val APP_PRIMARY_CONTAINER = Color.parseColor("#006D5B")
+        private val APP_ON_PRIMARY = Color.parseColor("#FFFFFF")
+        private val APP_SECONDARY_CONTAINER = Color.parseColor("#CFE3EE")
+        private val APP_SECONDARY_TEXT = Color.parseColor("#374953")
+        private val APP_AMBER = Color.parseColor("#FFBA38")
+        private val APP_AMBER_SURFACE = Color.parseColor("#FFF3D6")
+        private val APP_ERROR = Color.parseColor("#BA1A1A")
+        private val APP_ERROR_CONTAINER = Color.parseColor("#FFDAD6")
+        private val APP_ON_ERROR_CONTAINER = Color.parseColor("#93000A")
+        private val APP_SUCCESS = Color.parseColor("#0E9F6E")
+        private val APP_SUCCESS_SURFACE = Color.parseColor("#E2F7EF")
+        private val APP_SHADOW = Color.parseColor("#24006B59")
+        private val APP_SUCCESS_GLOW = Color.parseColor("#550E9F6E")
 
         private val COLOR_PALETTE = intArrayOf(
             OverlayPreferences.DEFAULT_HANZI_COLOR,
             OverlayPreferences.DEFAULT_PINYIN_COLOR,
             OverlayPreferences.DEFAULT_ENGLISH_COLOR,
-            Color.WHITE,
-            Color.parseColor("#20242A"),
-            Color.parseColor("#7F56D9"),
-            Color.parseColor("#2F80ED"),
-            Color.parseColor("#12B76A"),
-            Color.parseColor("#F97316"),
-            Color.parseColor("#EF4444"),
-            Color.parseColor("#EC4899"),
+            APP_ON_PRIMARY,
+            APP_TEXT_PRIMARY,
+            APP_PRIMARY_CONTAINER,
+            Color.parseColor("#4F616B"),
+            Color.parseColor("#0E9F6E"),
+            APP_AMBER,
+            Color.parseColor("#BA1A1A"),
+            Color.parseColor("#805800"),
         )
     }
 }

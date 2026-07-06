@@ -9,6 +9,10 @@ class AiLabPreferences(context: Context) {
         get() = AiVocabularySourceMode.fromStoredValue(prefs.getString(KEY_SOURCE_MODE, null))
         set(value) = prefs.edit().putString(KEY_SOURCE_MODE, value.storedValue).apply()
 
+    var hskLevel: AiHskLevel
+        get() = AiHskLevel.fromStoredValue(prefs.getString(KEY_HSK_LEVEL, null))
+        set(value) = prefs.edit().putString(KEY_HSK_LEVEL, value.storedValue).apply()
+
     var dailyGenerationHour: Int
         get() = prefs.getInt(KEY_DAILY_GENERATION_HOUR, DEFAULT_DAILY_GENERATION_HOUR)
         set(value) = prefs.edit().putInt(KEY_DAILY_GENERATION_HOUR, value.coerceIn(0, 23)).apply()
@@ -60,6 +64,7 @@ class AiLabPreferences(context: Context) {
     companion object {
         private const val PREFS_NAME = "ai_lab_preferences"
         private const val KEY_SOURCE_MODE = "source_mode"
+        private const val KEY_HSK_LEVEL = "hsk_level"
         private const val KEY_DAILY_GENERATION_HOUR = "daily_generation_hour"
         private const val KEY_DAILY_GENERATION_MINUTE = "daily_generation_minute"
         private const val KEY_DAILY_GENERATION_ENABLED = "daily_generation_enabled"
