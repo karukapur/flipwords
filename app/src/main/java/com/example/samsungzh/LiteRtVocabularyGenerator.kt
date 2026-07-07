@@ -9,12 +9,18 @@ class LiteRtVocabularyGenerator {
     suspend fun generate(
         modelFile: File,
         hskLevel: AiHskLevel = AiHskLevel.HSK_2,
+        targetCount: Int = AiLabPreferences.DEFAULT_GENERATION_TARGET_COUNT,
     ): String = withContext(Dispatchers.Default) {
-        runCatching { generateWithBackend(modelFile, hskLevel, backendName = "GPU") }
-            .getOrElse { generateWithBackend(modelFile, hskLevel, backendName = "CPU") }
+        runCatching { generateWithBackend(modelFile, hskLevel, targetCount, backendName = "GPU") }
+            .getOrElse { generateWithBackend(modelFile, hskLevel, targetCount, backendName = "CPU") }
     }
 
-    private fun generateWithBackend(modelFile: File, hskLevel: AiHskLevel, backendName: String): String {
+    private fun generateWithBackend(
+        modelFile: File,
+        hskLevel: AiHskLevel,
+        targetCount: Int,
+        backendName: String,
+    ): String {
         val packageName = "com.google.ai.edge.litertlm"
         val backendClass = Class.forName("$packageName.Backend")
         val backend = createBackend(packageName, backendName)
@@ -31,12 +37,17 @@ class LiteRtVocabularyGenerator {
             val conversation = engine.javaClass
                 .getMethod("createConversation", conversationConfig.javaClass)
                 .invoke(engine, conversationConfig)
+                ?: error("LiteRT-LM did not create a conversation.")
 
             try {
                 val message = conversation.javaClass
                     .getMethod("sendMessage", String::class.java, Map::class.java)
-                    .invoke(conversation, promptWithSystemInstruction(hskLevel), Collections.emptyMap<String, Any>())
-                message.toString()
+                    .invoke(
+                        conversation,
+                        promptWithSystemInstruction(hskLevel, targetCount),
+                        Collections.emptyMap<String, Any>(),
+                    )
+                message?.toString().orEmpty()
             } finally {
                 conversation.closeIfPossible()
             }
@@ -88,8 +99,22 @@ class LiteRtVocabularyGenerator {
         }
     }
 
-    private fun promptWithSystemInstruction(hskLevel: AiHskLevel): String =
-        "$SYSTEM_INSTRUCTION\n\nTarget level: ${hskLevel.promptDescription}.\n\n$PROMPT"
+    private fun promptWithSystemInstruction(hskLevel: AiHskLevel, targetCount: Int): String {
+        val normalizedTarget = targetCount.coerceIn(
+            AiLabPreferences.MIN_GENERATION_TARGET_COUNT,
+            AiLabPreferences.MAX_GENERATION_TARGET_COUNT,
+        )
+        val candidateCount = (normalizedTarget + maxOf(20, normalizedTarget / 2))
+            .coerceAtMost(AiLabPreferences.MAX_GENERATION_TARGET_COUNT + 60)
+        return """
+$SYSTEM_INSTRUCTION
+
+Target level: ${hskLevel.promptDescription}.
+The app needs $normalizedTarget valid saved entries. Generate $candidateCount candidates so validation can accept at least $normalizedTarget unique entries.
+
+$PROMPT
+""".trimIndent()
+    }
 
     companion object {
         private const val SYSTEM_INSTRUCTION =
@@ -97,7 +122,7 @@ class LiteRtVocabularyGenerator {
 
         private const val PROMPT = """
 Return only a JSON array. Do not include Markdown or explanations.
-Generate 80 candidate beginner to intermediate Traditional Taiwanese Mandarin words or short phrases.
+Generate beginner to intermediate Traditional Taiwanese Mandarin words or short phrases.
 No full sentences. No simplified Chinese.
 Each item must have exactly these fields: hanzi, pinyin, english.
 Constraints:

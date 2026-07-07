@@ -102,6 +102,12 @@ This document describes the current FlipWords feature set. It is meant to be a p
   - Tone-marked pinyin in brackets.
   - English meaning.
 - Overlay text can be tapped to advance to the next word when touch is permitted.
+- Auto-hide is enabled by default:
+  - Floating text detaches after 10 seconds.
+  - The setting can be toggled in the Word timing card.
+  - The visible duration can be changed from 3-60 seconds.
+  - The foreground notification stays active after the floating text hides.
+  - The floating overlay is retried when the screen wakes or display state changes.
 
 ## Cover Overlay Limitations
 
@@ -112,6 +118,7 @@ This document describes the current FlipWords feature set. It is meant to be a p
   - Another Samsung cover surface.
 - Because of that, the current overlay cannot reliably appear only on the first cover clock page while hiding on other cover pages.
 - The app documents this in its device/debug status as: cover display-wide overlay scope.
+- Auto-hide reduces how long the floating text can cover notifications, but it is not true cover-page detection.
 - If Samsung blocks cover-display overlay attachment, the app keeps the foreground notification fallback.
 
 ## Persistent Notification
@@ -192,16 +199,17 @@ This document describes the current FlipWords feature set. It is meant to be a p
 
 - Generation is started manually with `Generate now` or by an exact daily alarm.
 - AI Lab shows an indeterminate in-app generation progress indicator while local generation is running.
-- The manual generation button changes to `Generate 50 words` when ready and `Generating...` while running.
-- AI source and HSK selectors are temporarily disabled while generation is running.
+- The manual generation button changes to `Generate {selected count} words` when ready and `Generating...` while running.
+- AI source, HSK, and pack-size selectors are temporarily disabled while generation is running.
 - Generation runs in a WorkManager `CoroutineWorker`.
 - The worker runs as foreground work with a notification.
 - The worker initializes LiteRT-LM only inside the background generation task.
 - Backend strategy:
   - Try GPU first.
   - If GPU initialization/generation fails, retry with CPU.
-- Prompt asks for 80 candidate entries so the validator can accept the first 50 valid unique entries.
-- Generated pack size requirement is exactly 50 valid entries.
+- Prompt asks for extra candidate entries so the validator can accept the selected number of valid unique entries.
+- Generated pack size requirement matches the selected target, from 25 to 150 entries.
+- Default generated pack size is 50 entries.
 - The user can select an HSK target level before generation.
 - AI-generated content target:
   - Beginner/intermediate Traditional Taiwanese Mandarin.
@@ -216,7 +224,7 @@ This document describes the current FlipWords feature set. It is meant to be a p
 
 ## AI Vocabulary Validation
 
-- Generated vocabulary is not activated unless validation accepts 50 entries.
+- Generated vocabulary is not activated unless validation accepts the selected target count.
 - Validation rejects:
   - Empty Hanzi, pinyin, or English fields.
   - Hanzi longer than 8 characters.
@@ -250,7 +258,7 @@ This document describes the current FlipWords feature set. It is meant to be a p
   - `Generated first`
   - `Generated only`
   - `Mix both`
-- AI Lab uses custom selector rows for generated source and HSK level instead of native dropdown fields.
+- AI Lab uses custom selector rows for generated source, HSK level, and generated pack size instead of native dropdown fields.
 - Default mode is `Generated first`.
 - If no generated pack exists, every mode falls back to the built-in list.
 - `Generated first` uses generated entries before the built-in fallback list.

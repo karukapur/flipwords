@@ -23,6 +23,18 @@ class GeneratedVocabularyValidatorTest {
     }
 
     @Test
+    fun stopsAtSelectedTargetCount() {
+        val raw = (1..30).joinToString(prefix = "[", postfix = "]") { index ->
+            """{"hanzi":"詞$index","pinyin":"cí","english":"word $index"}"""
+        }
+
+        val entries = GeneratedVocabularyValidator.parseValidEntries(raw, 123L, targetCount = 25)
+
+        assertEquals(25, entries.size)
+        assertEquals("詞25", entries.last().hanzi)
+    }
+
+    @Test
     fun rejectsSimplifiedCharacters() {
         val entry = GeneratedVocabularyEntry("学习", "xué xí", "study", "test", 0L)
 

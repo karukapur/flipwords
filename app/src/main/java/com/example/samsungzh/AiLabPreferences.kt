@@ -13,6 +13,13 @@ class AiLabPreferences(context: Context) {
         get() = AiHskLevel.fromStoredValue(prefs.getString(KEY_HSK_LEVEL, null))
         set(value) = prefs.edit().putString(KEY_HSK_LEVEL, value.storedValue).apply()
 
+    var generationTargetCount: Int
+        get() = prefs.getInt(KEY_GENERATION_TARGET_COUNT, DEFAULT_GENERATION_TARGET_COUNT)
+            .coerceIn(MIN_GENERATION_TARGET_COUNT, MAX_GENERATION_TARGET_COUNT)
+        set(value) = prefs.edit()
+            .putInt(KEY_GENERATION_TARGET_COUNT, value.coerceIn(MIN_GENERATION_TARGET_COUNT, MAX_GENERATION_TARGET_COUNT))
+            .apply()
+
     var dailyGenerationHour: Int
         get() = prefs.getInt(KEY_DAILY_GENERATION_HOUR, DEFAULT_DAILY_GENERATION_HOUR)
         set(value) = prefs.edit().putInt(KEY_DAILY_GENERATION_HOUR, value.coerceIn(0, 23)).apply()
@@ -65,6 +72,7 @@ class AiLabPreferences(context: Context) {
         private const val PREFS_NAME = "ai_lab_preferences"
         private const val KEY_SOURCE_MODE = "source_mode"
         private const val KEY_HSK_LEVEL = "hsk_level"
+        private const val KEY_GENERATION_TARGET_COUNT = "generation_target_count"
         private const val KEY_DAILY_GENERATION_HOUR = "daily_generation_hour"
         private const val KEY_DAILY_GENERATION_MINUTE = "daily_generation_minute"
         private const val KEY_DAILY_GENERATION_ENABLED = "daily_generation_enabled"
@@ -80,6 +88,9 @@ class AiLabPreferences(context: Context) {
 
         private const val DEFAULT_DAILY_GENERATION_HOUR = 2
         private const val DEFAULT_DAILY_GENERATION_MINUTE = 0
+        const val DEFAULT_GENERATION_TARGET_COUNT = 50
+        const val MIN_GENERATION_TARGET_COUNT = 25
+        const val MAX_GENERATION_TARGET_COUNT = 150
         const val NO_DOWNLOAD_ID = -1L
 
         const val MODEL_NOT_DOWNLOADED = "Model: not downloaded"

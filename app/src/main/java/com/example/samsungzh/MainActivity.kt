@@ -65,6 +65,9 @@ class MainActivity : Activity() {
     private lateinit var frequencyMetricView: TextView
     private lateinit var intervalStatusView: TextView
     private lateinit var intervalChangeButton: TextView
+    private lateinit var autoHideStatusView: TextView
+    private lateinit var autoHideDurationButton: TextView
+    private lateinit var autoHideSwitch: Switch
     private lateinit var permissionStatusView: TextView
     private lateinit var rotationStatusView: TextView
     private lateinit var displayStatusView: TextView
@@ -84,6 +87,7 @@ class MainActivity : Activity() {
     private lateinit var aiDailySwitch: Switch
     private lateinit var aiSourceButton: TextView
     private lateinit var aiHskButton: TextView
+    private lateinit var aiGenerationCountButton: TextView
     private lateinit var aiModelPillView: TextView
     private lateinit var aiPackPillView: TextView
     private lateinit var learnSection: LinearLayout
@@ -144,8 +148,8 @@ class MainActivity : Activity() {
 
         val contentShell = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            clipChildren = false
-            clipToPadding = false
+            clipChildren = true
+            clipToPadding = true
         }
         val contentRoot = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -156,6 +160,7 @@ class MainActivity : Activity() {
         val scrollView = ScrollView(this).apply {
             setBackgroundColor(APP_BACKGROUND)
             isFillViewport = true
+            overScrollMode = View.OVER_SCROLL_NEVER
             clipToPadding = false
             addView(contentRoot)
         }
@@ -171,7 +176,11 @@ class MainActivity : Activity() {
             addView(buildTimingCard(), textLayoutParams(topMargin = 16))
         }
         aiLabSection = sectionContainer().apply {
-            addView(buildAiLabCard(), textLayoutParams())
+            addView(buildAiLabHeroCard(), textLayoutParams())
+            addView(buildAiModelCard(), textLayoutParams(topMargin = 16))
+            addView(buildAiGenerationCard(), textLayoutParams(topMargin = 16))
+            addView(buildAiSourceCard(), textLayoutParams(topMargin = 16))
+            addView(buildAiAutomationCard(), textLayoutParams(topMargin = 16))
         }
         deviceSection = sectionContainer().apply {
             addView(buildStatusCard(), textLayoutParams())
@@ -394,15 +403,24 @@ class MainActivity : Activity() {
         val card = card()
         card.addView(sectionTextView("Word timing"))
         addIntervalControl(card)
+        addAutoHideControl(card)
         return card
     }
 
-    private fun buildAiLabCard(): LinearLayout {
+    private fun buildAiLabHeroCard(): LinearLayout {
         val card = card()
-        card.addView(sectionTextView("AI Lab"))
+        card.addView(
+            TextView(this).apply {
+                text = "AI Lab"
+                setTextColor(APP_TEXT_PRIMARY)
+                textSize = 32f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                includeFontPadding = false
+            },
+        )
         card.addView(
             infoTextView().apply {
-                text = "Generate compact Traditional Mandarin vocabulary locally when you want a fresh pack."
+                text = "Optional local vocabulary generation with flexible pack sizes."
             },
             textLayoutParams(topMargin = 10),
         )
@@ -416,7 +434,12 @@ class MainActivity : Activity() {
         aiPillRow.addView(aiModelPillView, weightedButtonLayoutParams())
         aiPillRow.addView(aiPackPillView, weightedButtonLayoutParams(startMargin = 8))
         card.addView(aiPillRow)
+        return card
+    }
 
+    private fun buildAiModelCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTextView("Model setup"))
         aiModelStatusView = infoTextView()
         aiDownloadProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
@@ -428,12 +451,46 @@ class MainActivity : Activity() {
             minHeight = dp(8)
         }
         aiDownloadProgressView = infoTextView()
-        aiGeneratedStatusView = infoTextView()
-        aiScheduleStatusView = infoTextView()
-        aiSourceStatusView = infoTextView()
+        card.addView(
+            TextView(this).apply {
+                text = "gemma-4-E2B-it.litertlm"
+                setTextColor(APP_PRIMARY)
+                textSize = 11f
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                includeFontPadding = false
+                background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 14, strokeColor = APP_OUTLINE_VARIANT)
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                setButtonIcon(this, R.drawable.ic_device, APP_PRIMARY)
+            },
+            textLayoutParams(topMargin = 14),
+        )
         card.addView(aiModelStatusView, textLayoutParams(topMargin = 12))
         card.addView(aiDownloadProgressBar, textLayoutParams(topMargin = 8))
         card.addView(aiDownloadProgressView, textLayoutParams(topMargin = 4))
+        aiModelActionButton = actionButton("Download AI model", primary = false, iconRes = R.drawable.ic_download).apply {
+            setOnClickListener { handleModelAction() }
+        }
+        card.addView(aiModelActionButton, textLayoutParams(topMargin = 16))
+        return card
+    }
+
+    private fun buildAiGenerationCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTextView("Generation output"))
+        card.addView(
+            infoTextView().apply {
+                text = "Create validated Traditional Chinese entries for fresh cover-screen practice."
+            },
+            textLayoutParams(topMargin = 10),
+        )
+        val chipColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(12), 0, 0)
+        }
+        chipColumn.addView(buildFeaturePill("Tone-marked pinyin"), textLayoutParams())
+        chipColumn.addView(buildFeaturePill("Traditional Hanzi"), textLayoutParams(topMargin = 8))
+        chipColumn.addView(buildFeaturePill("Compact English glosses"), textLayoutParams(topMargin = 8))
+        card.addView(chipColumn)
         aiGenerationProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -443,25 +500,22 @@ class MainActivity : Activity() {
             minHeight = dp(8)
         }
         aiGenerationStatusView = infoTextView()
-        card.addView(aiGenerationProgressBar, textLayoutParams(topMargin = 12))
-        card.addView(aiGenerationStatusView, textLayoutParams(topMargin = 6))
-        card.addView(aiGeneratedStatusView, textLayoutParams(topMargin = 8))
-        card.addView(aiSourceStatusView, textLayoutParams(topMargin = 8))
-
-        aiSourceButton = selectorButton("Source", aiLabPreferences.sourceMode.label, R.drawable.ic_source).apply {
-            setOnClickListener { showSourceModeDialog() }
+        aiGeneratedStatusView = infoTextView()
+        aiGenerationCountButton = selectorButton(
+            "Words",
+            aiLabPreferences.generationTargetCount.toString(),
+            R.drawable.ic_sparkle,
+        ).apply {
+            setOnClickListener { showGenerationTargetDialog() }
         }
-        card.addView(aiSourceButton, textLayoutParams(topMargin = 16))
-
+        card.addView(aiGenerationCountButton, textLayoutParams(topMargin = 16))
         aiHskButton = selectorButton("Level", aiLabPreferences.hskLevel.label, R.drawable.ic_level).apply {
             setOnClickListener { showHskLevelDialog() }
         }
         card.addView(aiHskButton, textLayoutParams(topMargin = 8))
-
-        aiModelActionButton = actionButton("Download AI model", primary = false, iconRes = R.drawable.ic_download).apply {
-            setOnClickListener { handleModelAction() }
-        }
-        card.addView(aiModelActionButton, textLayoutParams(topMargin = 16))
+        card.addView(aiGenerationProgressBar, textLayoutParams(topMargin = 14))
+        card.addView(aiGenerationStatusView, textLayoutParams(topMargin = 6))
+        card.addView(aiGeneratedStatusView, textLayoutParams(topMargin = 8))
         aiGenerateButton = actionButton("Generate now", primary = true, iconRes = R.drawable.ic_sparkle).apply {
             setOnClickListener {
                 maybeRequestNotificationPermission()
@@ -470,12 +524,30 @@ class MainActivity : Activity() {
                 render()
             }
         }
-        card.addView(aiGenerateButton, textLayoutParams(topMargin = 8))
+        card.addView(aiGenerateButton, textLayoutParams(topMargin = 14))
+        return card
+    }
 
+    private fun buildAiSourceCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTextView("Source logic"))
+        aiSourceStatusView = infoTextView()
+        card.addView(aiSourceStatusView, textLayoutParams(topMargin = 10))
+        aiSourceButton = selectorButton("Source", aiLabPreferences.sourceMode.label, R.drawable.ic_source).apply {
+            setOnClickListener { showSourceModeDialog() }
+        }
+        card.addView(aiSourceButton, textLayoutParams(topMargin = 14))
+        return card
+    }
+
+    private fun buildAiAutomationCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTextView("Automation"))
+        aiScheduleStatusView = infoTextView()
         aiTimeButton = actionButton("Daily time: ${formatGenerationTime()}", primary = false, iconRes = R.drawable.ic_clock).apply {
             setOnClickListener { showGenerationTimePicker() }
         }
-        card.addView(aiTimeButton, textLayoutParams(topMargin = 8))
+        card.addView(aiTimeButton, textLayoutParams(topMargin = 14))
 
         val dailyRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -564,6 +636,7 @@ class MainActivity : Activity() {
         frequencyMetricView.text = formatInterval(info.intervalMillis / 1000L)
         renderOverlayActions()
         updateIntervalControls()
+        updateAutoHideControls()
         permissionStatusView.text = overlayPermissionText()
         rotationStatusView.text =
             "Interval: ${formatInterval(info.intervalMillis / 1000L)}\nNext rotation: ${
@@ -606,6 +679,7 @@ class MainActivity : Activity() {
         val modelFailed = modelStatus == AiLabPreferences.MODEL_FAILED
         val generatedFailed = aiLabPreferences.generatedStatus.startsWith(AiLabPreferences.GENERATED_FAILED)
         val hasGeneratedPack = aiLabPreferences.generatedCount > 0
+        val targetCount = aiLabPreferences.generationTargetCount
 
         configureStatusPill(
             pill = aiModelPillView,
@@ -684,7 +758,7 @@ class MainActivity : Activity() {
             text = when {
                 generatedFailed -> "Last generation failed. Recovery log appears when you reopen the app."
                 hasGeneratedPack -> "Last updated ${formatOptionalTime(aiLabPreferences.lastGenerationMillis)}"
-                else -> "Generate a local pack when you want fresh practice."
+                else -> "Generate a local $targetCount-word pack when you want fresh practice."
             },
             iconRes = when {
                 generatedFailed -> R.drawable.ic_warning
@@ -705,6 +779,7 @@ class MainActivity : Activity() {
         )
         configureSelectorButton(aiSourceButton, "Source", aiLabPreferences.sourceMode.label, R.drawable.ic_source)
         configureSelectorButton(aiHskButton, "Level", aiLabPreferences.hskLevel.label, R.drawable.ic_level)
+        configureSelectorButton(aiGenerationCountButton, "Words", targetCount.toString(), R.drawable.ic_sparkle)
         configureActionButton(
             button = aiModelActionButton,
             text = when {
@@ -722,7 +797,7 @@ class MainActivity : Activity() {
             button = aiGenerateButton,
             text = when {
                 generating -> "Generating..."
-                modelReady -> "Generate 50 words"
+                modelReady -> "Generate $targetCount words"
                 else -> "Download model first"
             },
             primary = true,
@@ -740,6 +815,8 @@ class MainActivity : Activity() {
         aiSourceButton.alpha = if (generating) 0.55f else 1f
         aiHskButton.isEnabled = !generating
         aiHskButton.alpha = if (generating) 0.55f else 1f
+        aiGenerationCountButton.isEnabled = !generating
+        aiGenerationCountButton.alpha = if (generating) 0.55f else 1f
 
         val exactStatus = if (AiGenerationScheduler.canScheduleExact(this)) "granted" else "blocked"
         val enabled = if (aiLabPreferences.dailyGenerationEnabled) "enabled" else "off"
@@ -965,6 +1042,61 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun showGenerationTargetDialog() {
+        val presets = listOf(25, 50, 75, 100, 150)
+        val labels = presets.map { "$it words" } + "Custom..."
+        val currentIndex = presets.indexOf(aiLabPreferences.generationTargetCount)
+
+        AlertDialog.Builder(this)
+            .setTitle("Words per pack")
+            .setSingleChoiceItems(labels.toTypedArray(), currentIndex) { dialog, which ->
+                dialog.dismiss()
+                if (which < presets.size) {
+                    aiLabPreferences.generationTargetCount = presets[which]
+                    render()
+                } else {
+                    showCustomGenerationTargetDialog()
+                }
+            }
+            .show()
+    }
+
+    private fun showCustomGenerationTargetDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(aiLabPreferences.generationTargetCount.toString())
+            selectAll()
+            setPadding(dp(12), 0, dp(12), 0)
+            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 16, strokeColor = APP_OUTLINE_VARIANT)
+            minHeight = dp(52)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Custom pack size")
+            .setMessage(
+                "Choose ${AiLabPreferences.MIN_GENERATION_TARGET_COUNT}-${AiLabPreferences.MAX_GENERATION_TARGET_COUNT} words.",
+            )
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Done") { _, _ ->
+                val value = input.text.toString().toIntOrNull() ?: return@setPositiveButton
+                val normalized = value.coerceIn(
+                    AiLabPreferences.MIN_GENERATION_TARGET_COUNT,
+                    AiLabPreferences.MAX_GENERATION_TARGET_COUNT,
+                )
+                aiLabPreferences.generationTargetCount = normalized
+                if (normalized != value) {
+                    Toast.makeText(
+                        this,
+                        "Pack size adjusted to $normalized words.",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                render()
+            }
+            .show()
+    }
+
     private fun updateIntervalControls() {
         if (!::intervalStatusView.isInitialized) return
 
@@ -978,6 +1110,93 @@ class MainActivity : Activity() {
                 iconRes = R.drawable.ic_clock,
             )
         }
+    }
+
+    private fun addAutoHideControl(root: LinearLayout) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundedBackground(APP_MUTED_SURFACE, radius = 18)
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            attachPressFeedback(this)
+        }
+        row.addView(
+            TextView(this).apply {
+                text = "Auto-hide overlay"
+                setTextColor(APP_TEXT_PRIMARY)
+                textSize = 15f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                setButtonIcon(this, R.drawable.ic_clock, APP_SECONDARY_TEXT)
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        autoHideSwitch = Switch(this).apply {
+            isChecked = overlayPreferences.autoHideEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                if (!updatingUi) handleAutoHideToggle(isChecked)
+            }
+        }
+        row.addView(autoHideSwitch)
+        root.addView(row, textLayoutParams(topMargin = 18))
+
+        autoHideStatusView = infoTextView()
+        root.addView(autoHideStatusView, textLayoutParams(topMargin = 8))
+
+        autoHideDurationButton = actionButton("Visible duration", primary = false, iconRes = R.drawable.ic_clock).apply {
+            setOnClickListener { showAutoHideOptionsDialog() }
+        }
+        root.addView(autoHideDurationButton, textLayoutParams(topMargin = 12))
+        updateAutoHideControls()
+    }
+
+    private fun updateAutoHideControls() {
+        if (!::autoHideStatusView.isInitialized) return
+
+        val enabled = overlayPreferences.autoHideEnabled
+        val duration = formatInterval(overlayPreferences.autoHideSeconds.toLong())
+        updatingUi = true
+        autoHideSwitch.setOnCheckedChangeListener(null)
+        autoHideSwitch.isChecked = enabled
+        autoHideSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (!updatingUi) handleAutoHideToggle(isChecked)
+        }
+        updatingUi = false
+
+        configureInfoLine(
+            view = autoHideStatusView,
+            text = if (enabled) "Floating text hides after $duration; the notification stays active." else "Floating text stays visible while the overlay is running.",
+            iconRes = if (enabled) R.drawable.ic_check else R.drawable.ic_repeat,
+            iconTint = if (enabled) APP_SUCCESS else APP_SECONDARY_TEXT,
+        )
+        configureActionButton(
+            button = autoHideDurationButton,
+            text = "Visible for $duration",
+            primary = false,
+            iconRes = R.drawable.ic_clock,
+        )
+        autoHideDurationButton.isEnabled = enabled
+        autoHideDurationButton.alpha = if (enabled) 1f else 0.55f
+    }
+
+    private fun showAutoHideOptionsDialog() {
+        val presets = listOf(
+            IntervalPreset("3 sec", 3),
+            IntervalPreset("5 sec", 5),
+            IntervalPreset("10 sec", 10),
+            IntervalPreset("20 sec", 20),
+            IntervalPreset("30 sec", 30),
+            IntervalPreset("60 sec", 60),
+        )
+        val labels = presets.map { it.label }
+        val currentIndex = presets.indexOfFirst { it.seconds == overlayPreferences.autoHideSeconds }
+
+        AlertDialog.Builder(this)
+            .setTitle("Hide floating text after")
+            .setSingleChoiceItems(labels.toTypedArray(), currentIndex) { dialog, which ->
+                dialog.dismiss()
+                setAutoHideSeconds(presets[which].seconds)
+            }
+            .show()
     }
 
     private fun showIntervalOptionsDialog() {
@@ -1200,6 +1419,12 @@ class MainActivity : Activity() {
         render()
     }
 
+    private fun handleAutoHideToggle(enabled: Boolean) {
+        overlayPreferences.autoHideEnabled = enabled
+        refreshOverlay()
+        render()
+    }
+
     private fun animateWordChange() {
         listOf(hanziView, pinyinView, englishView).forEachIndexed { index, view ->
             view.alpha = 0f
@@ -1226,6 +1451,22 @@ class MainActivity : Activity() {
             Toast.makeText(
                 this,
                 "Frequency adjusted to ${formatInterval(normalized.toLong())}.",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+        render()
+    }
+
+    private fun setAutoHideSeconds(seconds: Int) {
+        val min = OverlayPreferences.MIN_AUTO_HIDE_SECONDS
+        val max = OverlayPreferences.MAX_AUTO_HIDE_SECONDS
+        val normalized = seconds.coerceIn(min, max)
+        overlayPreferences.autoHideSeconds = normalized
+        refreshOverlay()
+        if (normalized != seconds) {
+            Toast.makeText(
+                this,
+                "Auto-hide adjusted to ${formatInterval(normalized.toLong())}.",
                 Toast.LENGTH_SHORT,
             ).show()
         }
@@ -1547,6 +1788,20 @@ class MainActivity : Activity() {
             minHeight = dp(38)
             background = roundedBackground(APP_SUCCESS_SURFACE, radius = 19)
             setPadding(dp(8), 0, dp(8), 0)
+        }
+
+    private fun buildFeaturePill(text: String): TextView =
+        TextView(this).apply {
+            this.text = text
+            setTextColor(APP_TEXT_PRIMARY)
+            textSize = 12f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            includeFontPadding = false
+            minHeight = dp(40)
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 20, strokeColor = APP_OUTLINE_VARIANT)
+            setPadding(dp(14), 0, dp(14), 0)
+            setButtonIcon(this, R.drawable.ic_check, APP_PRIMARY)
         }
 
     private fun configureStatusPill(

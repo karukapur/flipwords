@@ -43,8 +43,21 @@ class OverlayPreferences(context: Context) {
             .putInt(KEY_ROTATION_INTERVAL_SECONDS, value.coerceIn(MIN_ROTATION_INTERVAL_SECONDS, MAX_ROTATION_INTERVAL_SECONDS))
             .apply()
 
+    var autoHideEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_HIDE_ENABLED, DEFAULT_AUTO_HIDE_ENABLED)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_HIDE_ENABLED, value).apply()
+
+    var autoHideSeconds: Int
+        get() = prefs.getInt(KEY_AUTO_HIDE_SECONDS, DEFAULT_AUTO_HIDE_SECONDS)
+        set(value) = prefs.edit()
+            .putInt(KEY_AUTO_HIDE_SECONDS, value.coerceIn(MIN_AUTO_HIDE_SECONDS, MAX_AUTO_HIDE_SECONDS))
+            .apply()
+
     val rotationIntervalMillis: Long
         get() = rotationIntervalSeconds * 1000L
+
+    val autoHideMillis: Long
+        get() = autoHideSeconds * 1000L
 
     companion object {
         private const val PREFS_NAME = "overlay_preferences"
@@ -57,6 +70,8 @@ class OverlayPreferences(context: Context) {
         private const val KEY_OVERLAY_STATUS = "overlay_status"
         private const val KEY_OVERLAY_ENABLED = "overlay_enabled"
         private const val KEY_ROTATION_INTERVAL_SECONDS = "rotation_interval_seconds"
+        private const val KEY_AUTO_HIDE_ENABLED = "auto_hide_enabled"
+        private const val KEY_AUTO_HIDE_SECONDS = "auto_hide_seconds"
 
         const val DEFAULT_HANZI_SIZE = 30
         const val DEFAULT_PINYIN_SIZE = 13
@@ -77,6 +92,11 @@ class OverlayPreferences(context: Context) {
         const val MIN_ROTATION_INTERVAL_SECONDS = 5
         const val MAX_ROTATION_INTERVAL_SECONDS = 90 * 60
         const val ROTATION_INTERVAL_STEP_SECONDS = 5
+
+        const val DEFAULT_AUTO_HIDE_ENABLED = true
+        const val DEFAULT_AUTO_HIDE_SECONDS = 10
+        const val MIN_AUTO_HIDE_SECONDS = 3
+        const val MAX_AUTO_HIDE_SECONDS = 60
 
         const val STATUS_IDLE = "Overlay status: idle"
         const val STATUS_WAITING = "Overlay status: waiting for cover display. Main display fallback disabled."

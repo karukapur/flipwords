@@ -38,16 +38,21 @@ class AiVocabularyGenerationWorker(
 
         return try {
             val now = System.currentTimeMillis()
-            prefs.generatedStatus = "${AiLabPreferences.GENERATED_RUNNING}: ${prefs.hskLevel.label}, loading model"
-            val rawOutput = LiteRtVocabularyGenerator().generate(modelManager.modelFile(), prefs.hskLevel)
+            val targetCount = prefs.generationTargetCount
+            prefs.generatedStatus = "${AiLabPreferences.GENERATED_RUNNING}: ${prefs.hskLevel.label}, $targetCount words, loading model"
+            val rawOutput = LiteRtVocabularyGenerator().generate(
+                modelFile = modelManager.modelFile(),
+                hskLevel = prefs.hskLevel,
+                targetCount = targetCount,
+            )
             prefs.generatedStatus = "${AiLabPreferences.GENERATED_RUNNING}: validating entries"
-            val entries = GeneratedVocabularyValidator.parseValidEntries(rawOutput, now)
-            if (entries.size < GeneratedVocabularyValidator.REQUIRED_BATCH_SIZE) {
+            val entries = GeneratedVocabularyValidator.parseValidEntries(rawOutput, now, targetCount)
+            if (entries.size < targetCount) {
                 prefs.generatedStatus =
-                    "${AiLabPreferences.GENERATED_FAILED}: ${entries.size}/50 valid entries"
+                    "${AiLabPreferences.GENERATED_FAILED}: ${entries.size}/$targetCount valid entries"
                 AiDebugLogDumper.recordFailure(
                     context = applicationContext,
-                    reason = "Generated output did not contain 50 valid entries.",
+                    reason = "Generated output did not contain $targetCount valid entries.",
                     rawOutput = rawOutput,
                     validEntryCount = entries.size,
                 )

@@ -4,7 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object GeneratedVocabularyValidator {
-    const val REQUIRED_BATCH_SIZE = 50
+    const val DEFAULT_BATCH_SIZE = 50
     const val MAX_HANZI_CHARS = 8
     const val MAX_PINYIN_CHARS = 48
     const val MAX_ENGLISH_CHARS = 36
@@ -19,11 +19,19 @@ object GeneratedVocabularyValidator {
     )
     private val sentencePunctuation = setOf('。', '！', '？', '；', '：', '，', '、')
 
-    fun parseValidEntries(rawOutput: String, createdAtMillis: Long): List<GeneratedVocabularyEntry> {
+    fun parseValidEntries(
+        rawOutput: String,
+        createdAtMillis: Long,
+        targetCount: Int = DEFAULT_BATCH_SIZE,
+    ): List<GeneratedVocabularyEntry> {
         val json = extractJsonArray(rawOutput) ?: return emptyList()
         val seen = linkedSetOf<String>()
         val entries = mutableListOf<GeneratedVocabularyEntry>()
         val array = JSONArray(json)
+        val normalizedTarget = targetCount.coerceIn(
+            AiLabPreferences.MIN_GENERATION_TARGET_COUNT,
+            AiLabPreferences.MAX_GENERATION_TARGET_COUNT,
+        )
 
         for (index in 0 until array.length()) {
             val obj = array.optJSONObject(index) ?: continue
@@ -32,7 +40,7 @@ object GeneratedVocabularyValidator {
                 seen.add(entry.hanzi)
                 entries.add(entry)
             }
-            if (entries.size == REQUIRED_BATCH_SIZE) break
+            if (entries.size == normalizedTarget) break
         }
 
         return entries
