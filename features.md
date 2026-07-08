@@ -56,9 +56,9 @@ This document describes the current FlipWords feature set. It is meant to be a p
 
 - Native Android Kotlin app using programmatic views.
 - Material 3-inspired UI based on `DESIGN.md`.
-- Uses a top brand bar with `FlipWords` left-aligned and the app logo right-aligned.
-- Uses floating icon-and-label bottom navigation for `Learn`, `Style`, `AI Lab`, and `Device`.
-- The selected tab uses a soft pill indicator, primary tint, and a small elevation transition while inactive tabs remain muted.
+- Uses a top app bar with the active section title left-aligned and the app logo right-aligned.
+- Uses fixed icon-only bottom navigation for `Learn`, `Style`, `AI Lab`, and `Device`.
+- The selected tab uses a soft icon indicator, primary tint, and a small elevation transition while inactive tabs remain muted.
 - Uses a warm ivory background, deep jade primary actions, muted tonal surfaces, pill-shaped controls, large rounded "digital paper" cards, and subtle shadows.
 - Uses tonal layering plus restrained Material-style elevation instead of heavy card shadows.
 - Main app sections:

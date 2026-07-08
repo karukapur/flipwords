@@ -1,15 +1,23 @@
 package com.example.samsungzh
 
+import android.animation.ValueAnimator
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.app.TimePickerDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PixelFormat
+import android.graphics.RectF
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.hardware.display.DisplayManager
 import android.os.Build
@@ -21,10 +29,13 @@ import android.text.InputType
 import android.view.MotionEvent
 import android.view.Display
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
@@ -72,13 +83,16 @@ class MainActivity : Activity() {
     private lateinit var rotationStatusView: TextView
     private lateinit var displayStatusView: TextView
     private lateinit var aiModelStatusView: TextView
+    private lateinit var aiModelWarningView: TextView
     private lateinit var aiGeneratedStatusView: TextView
     private lateinit var aiScheduleStatusView: TextView
     private lateinit var aiSourceStatusView: TextView
     private lateinit var aiDownloadProgressBar: ProgressBar
+    private lateinit var aiDownloadPanelView: LinearLayout
     private lateinit var aiDownloadProgressView: TextView
     private lateinit var aiGenerationProgressBar: ProgressBar
     private lateinit var aiGenerationStatusView: TextView
+    private lateinit var aiGenerateRequirementView: TextView
     private lateinit var aiModelActionButton: TextView
     private lateinit var aiDeleteModelButton: TextView
     private lateinit var aiGenerateButton: TextView
@@ -86,6 +100,7 @@ class MainActivity : Activity() {
     private lateinit var aiAlarmPermissionButton: TextView
     private lateinit var aiDailySwitch: Switch
     private lateinit var aiSourceButton: TextView
+    private lateinit var aiSourceMixButton: TextView
     private lateinit var aiHskButton: TextView
     private lateinit var aiGenerationCountButton: TextView
     private lateinit var aiModelPillView: TextView
@@ -94,11 +109,15 @@ class MainActivity : Activity() {
     private lateinit var styleSection: LinearLayout
     private lateinit var aiLabSection: LinearLayout
     private lateinit var deviceSection: LinearLayout
-    private val tabButtons = mutableMapOf<AppTab, TextView>()
+    private lateinit var mainScrollView: ScrollView
+    private lateinit var topTitleView: TextView
+    private val tabButtons = mutableMapOf<AppTab, ImageView>()
     private var activeTab = AppTab.LEARN
     private var updatingUi = false
     private var aiFailurePromptShowing = false
     private var lastRenderedHanzi: String? = null
+    private var lastRenderedModelReady: Boolean? = null
+    private var lastRenderedGeneratedCount: Int? = null
 
     private val downloadProgressRunnable = object : Runnable {
         override fun run() {
@@ -144,8 +163,6 @@ class MainActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
             )
         }
-        applySystemBarPadding(root)
-
         val contentShell = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = true
@@ -157,15 +174,13 @@ class MainActivity : Activity() {
             clipToPadding = false
             setPadding(0, dp(18), 0, dp(112))
         }
-        val scrollView = ScrollView(this).apply {
+        mainScrollView = ScrollView(this).apply {
             setBackgroundColor(APP_BACKGROUND)
             isFillViewport = true
             overScrollMode = View.OVER_SCROLL_NEVER
             clipToPadding = false
             addView(contentRoot)
         }
-
-        contentShell.addView(buildTopAppBar(), textLayoutParams())
 
         learnSection = sectionContainer().apply {
             addView(buildHeroCard(), textLayoutParams())
@@ -186,12 +201,13 @@ class MainActivity : Activity() {
             addView(buildStatusCard(), textLayoutParams())
         }
 
-        contentRoot.addView(learnSection, textLayoutParams())
-        contentRoot.addView(styleSection, textLayoutParams())
-        contentRoot.addView(aiLabSection, textLayoutParams())
-        contentRoot.addView(deviceSection, textLayoutParams())
+        contentRoot.addView(buildTopAppBar(), textLayoutParams())
+        contentRoot.addView(learnSection, textLayoutParams(topMargin = 18))
+        contentRoot.addView(styleSection, textLayoutParams(topMargin = 18))
+        contentRoot.addView(aiLabSection, textLayoutParams(topMargin = 18))
+        contentRoot.addView(deviceSection, textLayoutParams(topMargin = 18))
         contentShell.addView(
-            scrollView,
+            mainScrollView,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 0,
@@ -205,38 +221,46 @@ class MainActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
             ),
         )
+        val bottomNavigation = buildBottomNavigation()
         root.addView(
-            buildBottomNavigation(),
+            bottomNavigation,
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
-            ).apply {
-                leftMargin = dp(10)
-                rightMargin = dp(10)
-                bottomMargin = dp(12)
-            },
+            ),
         )
+        applySystemBarPadding(contentShell, contentRoot, bottomNavigation)
         setContentView(root)
         root.requestApplyInsets()
         updateVisibleSection()
     }
 
     private fun buildHeroCard(): LinearLayout {
-        val card = card()
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedGradientBackground(
+                startColor = PREVIEW_BACKGROUND,
+                endColor = APP_LEARN_HERO_DEEP,
+                radius = 32,
+            )
+            applySoftElevation(this, AI_HERO_ELEVATION_DP)
+            setPadding(dp(24), dp(22), dp(24), dp(24))
+        }
 
         card.addView(
             TextView(this).apply {
-                text = "Today's word"
-                setTextColor(APP_TEXT_SECONDARY)
+                text = "Current word"
+                setTextColor(APP_AI_HERO_TEXT)
                 textSize = 14f
                 typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
                 includeFontPadding = false
+                setButtonIcon(this, R.drawable.ic_learn, APP_AMBER)
             },
         )
 
         hanziView = TextView(this).apply {
-            setTextColor(APP_TEXT_PRIMARY)
+            setTextColor(APP_ON_PRIMARY)
             textSize = 60f
             gravity = Gravity.CENTER
             typeface = Typeface.create(SERIF_FAMILY, Typeface.BOLD)
@@ -244,7 +268,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(34), 0, 0)
         }
         pinyinView = TextView(this).apply {
-            setTextColor(APP_TEXT_SECONDARY)
+            setTextColor(APP_AI_HERO_TEXT)
             textSize = 22f
             gravity = Gravity.CENTER
             typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
@@ -252,7 +276,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(10), 0, 0)
         }
         englishView = TextView(this).apply {
-            setTextColor(APP_PRIMARY)
+            setTextColor(APP_AMBER_SURFACE)
             textSize = 26f
             gravity = Gravity.CENTER
             typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
@@ -277,6 +301,7 @@ class MainActivity : Activity() {
         card.addView(metricsRow)
         overlayStatusView = infoTextView().apply {
             gravity = Gravity.CENTER
+            setTextColor(APP_AI_HERO_TEXT)
             setPadding(0, dp(18), 0, 0)
         }
         card.addView(overlayStatusView)
@@ -287,7 +312,10 @@ class MainActivity : Activity() {
             setPadding(0, dp(30), 0, 0)
         }
         overlayToggleButton = actionButton(getString(R.string.overlay_start), primary = true, iconRes = R.drawable.ic_play).apply {
-            setOnClickListener { handleOverlayToggle() }
+            setOnClickListener {
+                performActionHaptic()
+                handleOverlayToggle()
+            }
         }
         actions.addView(
             overlayToggleButton,
@@ -298,6 +326,7 @@ class MainActivity : Activity() {
             weightedButtonLayoutParams(startMargin = 10),
         )
         actions.getChildAt(1).setOnClickListener {
+            performSelectionHaptic()
             repository.advanceWord()
             refreshOverlay()
             render()
@@ -314,6 +343,7 @@ class MainActivity : Activity() {
             iconRes = R.drawable.ic_permission,
         ).apply {
             setOnClickListener {
+                performSelectionHaptic()
                 startActivity(CoverOverlayService.permissionSettingsIntent(this@MainActivity))
             }
         }
@@ -329,31 +359,36 @@ class MainActivity : Activity() {
     private fun buildPreviewCard(): LinearLayout {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = roundedBackground(PREVIEW_BACKGROUND, radius = 22)
+            background = roundedGradientBackground(PREVIEW_BACKGROUND, APP_PREVIEW_DEEP, radius = 28)
             applySoftElevation(this, CARD_ELEVATION_DP)
-            setPadding(dp(22), dp(22), dp(22), dp(22))
+            setPadding(dp(22), dp(22), dp(22), dp(24))
         }
         card.addView(
             TextView(this).apply {
-                text = "Overlay preview"
+                text = "Cover preview"
                 setTextColor(APP_INVERSE_TEXT)
                 textSize = 17f
                 typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                includeFontPadding = false
+                setButtonIcon(this, R.drawable.ic_device, APP_AMBER)
             },
         )
 
         previewHanziView = TextView(this).apply {
             includeFontPadding = false
-            setPadding(0, dp(18), 0, 0)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(24), 0, 0)
             typeface = Typeface.create(SERIF_FAMILY, Typeface.BOLD)
         }
         previewPinyinView = TextView(this).apply {
             includeFontPadding = false
+            gravity = Gravity.CENTER
             setPadding(0, dp(6), 0, 0)
             typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
         }
         previewEnglishView = TextView(this).apply {
             includeFontPadding = false
+            gravity = Gravity.CENTER
             setPadding(0, dp(6), 0, 0)
             typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
         }
@@ -364,8 +399,8 @@ class MainActivity : Activity() {
     }
 
     private fun buildStyleCard(): LinearLayout {
-        val card = card()
-        card.addView(sectionTextView("Text style"))
+        val card = appCard()
+        card.addView(appSectionHeader("Text style", "Typography", R.drawable.ic_style))
         addTextStyleControl(
             root = card,
             labelPrefix = "Hanzi",
@@ -400,47 +435,71 @@ class MainActivity : Activity() {
     }
 
     private fun buildTimingCard(): LinearLayout {
-        val card = card()
-        card.addView(sectionTextView("Word timing"))
+        val card = appCard()
+        card.addView(appSectionHeader("Word timing", "Cadence", R.drawable.ic_clock))
         addIntervalControl(card)
         addAutoHideControl(card)
         return card
     }
 
     private fun buildAiLabHeroCard(): LinearLayout {
-        val card = card()
-        card.addView(
-            TextView(this).apply {
-                text = "AI Lab"
-                setTextColor(APP_TEXT_PRIMARY)
-                textSize = 32f
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(8), 0, 0)
+            aiPackPillView = statusPill().apply {
+                visibility = View.GONE
+            }
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = "Optional local vocabulary generation."
+                    setTextColor(APP_TEXT_SECONDARY)
+                    textSize = 19f
+                    typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
+                    includeFontPadding = false
+                },
+                textLayoutParams(),
+            )
+            aiModelWarningView = TextView(this@MainActivity).apply {
+                setTextColor(APP_ON_ERROR_CONTAINER)
+                textSize = 16f
                 typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
-                includeFontPadding = false
-            },
-        )
-        card.addView(
-            infoTextView().apply {
-                text = "Optional local vocabulary generation with flexible pack sizes."
-            },
-            textLayoutParams(topMargin = 10),
-        )
-        val aiPillRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(14), 0, 0)
+                includeFontPadding = true
+                minHeight = dp(86)
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(18), dp(12), dp(18), dp(12))
+                background = roundedStrokeBackground(AI_WARNING_SURFACE, radius = 18, strokeColor = APP_ERROR_CONTAINER)
+                setButtonIcon(this, R.drawable.ic_warning, APP_ON_ERROR_CONTAINER)
+            }
+            addView(aiModelWarningView, textLayoutParams(topMargin = 34))
         }
-        aiModelPillView = statusPill()
-        aiPackPillView = statusPill()
-        aiPillRow.addView(aiModelPillView, weightedButtonLayoutParams())
-        aiPillRow.addView(aiPackPillView, weightedButtonLayoutParams(startMargin = 8))
-        card.addView(aiPillRow)
-        return card
     }
 
     private fun buildAiModelCard(): LinearLayout {
-        val card = card()
-        card.addView(sectionTextView("Model setup"))
-        aiModelStatusView = infoTextView()
+        val card = aiCard().apply {
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+        }
+        aiModelPillView = TextView(this).apply {
+            text = "GEMMA-4-E2B-IT.LITERTLM"
+            setTextColor(APP_PRIMARY)
+            textSize = 12f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            includeFontPadding = false
+            gravity = Gravity.CENTER_VERTICAL
+            minHeight = dp(34)
+            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 8, strokeColor = APP_AI_SUBTLE_STROKE)
+            setPadding(dp(12), 0, dp(12), 0)
+            setButtonIcon(this, R.drawable.ic_device, APP_PRIMARY)
+        }
+        card.addView(aiModelPillView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        aiModelStatusView = TextView(this).apply {
+            text = "Large local model required for autonomous on-device curriculum generation."
+            setTextColor(APP_TEXT_SECONDARY)
+            textSize = 17f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            includeFontPadding = true
+            setLineSpacing(dp(2).toFloat(), 1f)
+        }
+        card.addView(aiModelStatusView, textLayoutParams(topMargin = 18))
         aiDownloadProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progress = 0
@@ -448,161 +507,281 @@ class MainActivity : Activity() {
                 progressTintList = ColorStateList.valueOf(APP_AMBER)
                 progressBackgroundTintList = ColorStateList.valueOf(APP_SURFACE_CONTAINER_HIGH)
             }
-            minHeight = dp(8)
+            minimumHeight = dp(8)
         }
-        aiDownloadProgressView = infoTextView()
+        aiDownloadProgressView = TextView(this).apply {
+            setTextColor(APP_TEXT_SECONDARY)
+            textSize = 13f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            includeFontPadding = false
+            gravity = Gravity.END
+        }
+        aiDownloadPanelView = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = roundedBackground(APP_MUTED_SURFACE, radius = 14)
+                setPadding(dp(16), dp(14), dp(16), dp(14))
+                addView(
+                    LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(
+                            TextView(this@MainActivity).apply {
+                                text = "Downloading..."
+                                setTextColor(APP_PRIMARY)
+                                textSize = 15f
+                                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                                includeFontPadding = false
+                                setButtonIcon(this, R.drawable.ic_download, APP_PRIMARY)
+                            },
+                            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                        )
+                        addView(aiDownloadProgressView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                    },
+                    textLayoutParams(),
+                )
+                addView(aiDownloadProgressBar, textLayoutParams(topMargin = 14))
+            }
         card.addView(
-            TextView(this).apply {
-                text = "gemma-4-E2B-it.litertlm"
-                setTextColor(APP_PRIMARY)
-                textSize = 11f
-                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-                includeFontPadding = false
-                background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 14, strokeColor = APP_OUTLINE_VARIANT)
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                setButtonIcon(this, R.drawable.ic_device, APP_PRIMARY)
-            },
-            textLayoutParams(topMargin = 14),
+            aiDownloadPanelView,
+            textLayoutParams(topMargin = 28),
         )
-        card.addView(aiModelStatusView, textLayoutParams(topMargin = 12))
-        card.addView(aiDownloadProgressBar, textLayoutParams(topMargin = 8))
-        card.addView(aiDownloadProgressView, textLayoutParams(topMargin = 4))
-        aiModelActionButton = actionButton("Download AI model", primary = false, iconRes = R.drawable.ic_download).apply {
-            setOnClickListener { handleModelAction() }
+        aiModelActionButton = actionButton("Download model", primary = false, iconRes = R.drawable.ic_download).apply {
+            setOnClickListener {
+                performActionHaptic()
+                handleModelAction()
+            }
         }
-        card.addView(aiModelActionButton, textLayoutParams(topMargin = 16))
+        card.addView(aiModelActionButton, textLayoutParams(topMargin = 26))
         return card
     }
 
     private fun buildAiGenerationCard(): LinearLayout {
-        val card = card()
-        card.addView(sectionTextView("Generation output"))
-        card.addView(
-            infoTextView().apply {
-                text = "Create validated Traditional Chinese entries for fresh cover-screen practice."
-            },
-            textLayoutParams(topMargin = 10),
-        )
-        val chipColumn = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(12), 0, 0)
+        val card = aiCard().apply {
+            setPadding(dp(24), dp(28), dp(24), dp(24))
         }
-        chipColumn.addView(buildFeaturePill("Tone-marked pinyin"), textLayoutParams())
-        chipColumn.addView(buildFeaturePill("Traditional Hanzi"), textLayoutParams(topMargin = 8))
-        chipColumn.addView(buildFeaturePill("Compact English glosses"), textLayoutParams(topMargin = 8))
-        card.addView(chipColumn)
+        card.addView(
+            TextView(this).apply {
+                text = "Generation Output"
+                setTextColor(APP_TEXT_PRIMARY)
+                textSize = 24f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                includeFontPadding = false
+                gravity = Gravity.CENTER_HORIZONTAL
+            },
+        )
+        aiGeneratedStatusView = TextView(this).apply {
+            setTextColor(APP_TEXT_SECONDARY)
+            textSize = 16f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            includeFontPadding = true
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        card.addView(aiGeneratedStatusView, textLayoutParams(topMargin = 14))
+        card.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.START
+                addView(buildFeaturePill("Tone-marked pinyin"), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(54)))
+                addView(buildFeaturePill("Traditional Hanzi"), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(54)).apply {
+                    topMargin = dp(10)
+                })
+                addView(buildFeaturePill("Semantic context"), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(54)).apply {
+                    topMargin = dp(10)
+                })
+            },
+            textLayoutParams(topMargin = 24),
+        )
         aiGenerationProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 indeterminateTintList = ColorStateList.valueOf(APP_AMBER)
                 progressBackgroundTintList = ColorStateList.valueOf(APP_SURFACE_CONTAINER_HIGH)
             }
-            minHeight = dp(8)
+            minimumHeight = dp(8)
         }
         aiGenerationStatusView = infoTextView()
-        aiGeneratedStatusView = infoTextView()
         aiGenerationCountButton = selectorButton(
             "Words",
             aiLabPreferences.generationTargetCount.toString(),
             R.drawable.ic_sparkle,
         ).apply {
-            setOnClickListener { showGenerationTargetDialog() }
+            setOnClickListener {
+                performSelectionHaptic()
+                showGenerationTargetDialog()
+            }
         }
-        card.addView(aiGenerationCountButton, textLayoutParams(topMargin = 16))
         aiHskButton = selectorButton("Level", aiLabPreferences.hskLevel.label, R.drawable.ic_level).apply {
-            setOnClickListener { showHskLevelDialog() }
+            setOnClickListener {
+                performSelectionHaptic()
+                showHskLevelDialog()
+            }
         }
-        card.addView(aiHskButton, textLayoutParams(topMargin = 8))
+        aiGenerationCountButton.visibility = View.GONE
+        aiHskButton.visibility = View.GONE
+        card.addView(aiGenerationCountButton)
+        card.addView(aiHskButton)
         card.addView(aiGenerationProgressBar, textLayoutParams(topMargin = 14))
         card.addView(aiGenerationStatusView, textLayoutParams(topMargin = 6))
-        card.addView(aiGeneratedStatusView, textLayoutParams(topMargin = 8))
         aiGenerateButton = actionButton("Generate now", primary = true, iconRes = R.drawable.ic_sparkle).apply {
             setOnClickListener {
+                performActionHaptic()
                 maybeRequestNotificationPermission()
                 aiLabPreferences.generatedStatus = "${AiLabPreferences.GENERATED_RUNNING}: queued"
                 AiVocabularyGenerationWorker.enqueue(this@MainActivity)
                 render()
             }
         }
-        card.addView(aiGenerateButton, textLayoutParams(topMargin = 14))
+        card.addView(aiGenerateButton, textLayoutParams(topMargin = 28))
+        aiGenerateRequirementView = TextView(this).apply {
+                text = "Requires model download completion"
+                setTextColor(APP_TEXT_SECONDARY)
+                textSize = 12f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+                setButtonIcon(this, R.drawable.ic_status_dot, APP_TEXT_SECONDARY)
+            }
+        card.addView(
+            aiGenerateRequirementView,
+            textLayoutParams(topMargin = 12),
+        )
         return card
     }
 
     private fun buildAiSourceCard(): LinearLayout {
-        val card = card()
-        card.addView(sectionTextView("Source logic"))
-        aiSourceStatusView = infoTextView()
-        card.addView(aiSourceStatusView, textLayoutParams(topMargin = 10))
-        aiSourceButton = selectorButton("Source", aiLabPreferences.sourceMode.label, R.drawable.ic_source).apply {
-            setOnClickListener { showSourceModeDialog() }
+        val card = aiCard().apply {
+            setPadding(dp(24), dp(28), dp(24), dp(24))
         }
-        card.addView(aiSourceButton, textLayoutParams(topMargin = 14))
+        card.addView(
+            TextView(this).apply {
+                text = "Source Logic"
+                setTextColor(APP_TEXT_PRIMARY)
+                textSize = 24f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                includeFontPadding = false
+            },
+        )
+        aiSourceStatusView = infoTextView()
+        aiSourceStatusView.visibility = View.GONE
+        card.addView(aiSourceStatusView)
+        aiSourceButton = sourceSegmentButton("Built-in only").apply {
+            setOnClickListener {
+                performSelectionHaptic()
+                aiLabPreferences.sourceMode = AiVocabularySourceMode.BUILT_IN_ONLY
+                render()
+            }
+        }
+        aiSourceMixButton = sourceSegmentButton("Mix both").apply {
+            setOnClickListener {
+                performSelectionHaptic()
+                aiLabPreferences.sourceMode = AiVocabularySourceMode.MIX_BOTH
+                render()
+            }
+        }
+        card.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = roundedBackground(APP_MUTED_SURFACE, radius = 18)
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+                addView(aiSourceButton, textLayoutParams())
+                addView(aiSourceMixButton, textLayoutParams(topMargin = 6))
+            },
+            textLayoutParams(topMargin = 26),
+        )
         return card
     }
 
     private fun buildAiAutomationCard(): LinearLayout {
-        val card = card()
-        card.addView(sectionTextView("Automation"))
-        aiScheduleStatusView = infoTextView()
-        aiTimeButton = actionButton("Daily time: ${formatGenerationTime()}", primary = false, iconRes = R.drawable.ic_clock).apply {
-            setOnClickListener { showGenerationTimePicker() }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
         }
-        card.addView(aiTimeButton, textLayoutParams(topMargin = 14))
-
-        val dailyRow = LinearLayout(this).apply {
+        val card = aiCard().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = roundedBackground(APP_MUTED_SURFACE, radius = 18)
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            attachPressFeedback(this)
+            setPadding(dp(24), dp(22), dp(24), dp(22))
         }
-        dailyRow.addView(
-            TextView(this).apply {
-                text = "Generate daily"
-                setTextColor(APP_TEXT_PRIMARY)
-                textSize = 15f
-                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
-                setButtonIcon(this, R.drawable.ic_repeat, APP_SECONDARY_TEXT)
+        card.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = "Daily generation"
+                        setTextColor(APP_TEXT_PRIMARY)
+                        textSize = 24f
+                        typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                        includeFontPadding = false
+                    },
+                )
+                aiTimeButton = TextView(this@MainActivity).apply {
+                    text = formatGenerationTime()
+                    setTextColor(APP_PRIMARY)
+                    textSize = 16f
+                    typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                    includeFontPadding = false
+                    minHeight = dp(36)
+                    gravity = Gravity.CENTER_VERTICAL
+                    setButtonIcon(this, R.drawable.ic_clock, APP_PRIMARY)
+                    attachPressFeedback(this)
+                    setOnClickListener {
+                        performSelectionHaptic()
+                        showGenerationTimePicker()
+                    }
+                }
+                addView(aiTimeButton, textLayoutParams(topMargin = 8))
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
+        aiScheduleStatusView = infoTextView()
         aiDailySwitch = Switch(this).apply {
             isChecked = aiLabPreferences.dailyGenerationEnabled
             setOnCheckedChangeListener { _, isChecked ->
-                if (!updatingUi) handleDailyToggle(isChecked)
+                if (!updatingUi) {
+                    performSelectionHaptic()
+                    handleDailyToggle(isChecked)
+                }
             }
         }
-        dailyRow.addView(aiDailySwitch)
-        card.addView(dailyRow, textLayoutParams(topMargin = 8))
+        card.addView(aiDailySwitch)
+        root.addView(card, textLayoutParams())
 
         aiAlarmPermissionButton = actionButton("Alarm permission", primary = false, iconRes = R.drawable.ic_permission).apply {
             setOnClickListener {
+                performSelectionHaptic()
                 startActivity(AiGenerationScheduler.permissionIntent(this@MainActivity))
             }
         }
-        card.addView(aiAlarmPermissionButton, textLayoutParams(topMargin = 8))
-
-        card.addView(aiScheduleStatusView, textLayoutParams(topMargin = 8))
-        aiDeleteModelButton = actionButton("Delete AI model", primary = false, iconRes = R.drawable.ic_delete).apply {
-            setOnClickListener { handleModelAction() }
+        root.addView(aiAlarmPermissionButton, textLayoutParams(topMargin = 12))
+        aiScheduleStatusView.visibility = View.GONE
+        root.addView(aiScheduleStatusView)
+        aiDeleteModelButton = actionButton("Save AI debug log", primary = false, iconRes = R.drawable.ic_device).apply {
+            background = roundedBackground(Color.TRANSPARENT, radius = 24)
+            setTextColor(APP_TEXT_SECONDARY)
+            setOnClickListener {
+                performActionHaptic()
+                saveAiDebugLog()
+            }
         }
-        card.addView(aiDeleteModelButton, textLayoutParams(topMargin = 18))
+        root.addView(aiDeleteModelButton, textLayoutParams(topMargin = 28))
 
-        return card
+        return root
     }
 
     private fun buildStatusCard(): LinearLayout {
-        val card = card()
-        card.addView(sectionTextView("Device status"))
+        val card = appCard()
+        card.addView(appSectionHeader("Device status", "Cover display", R.drawable.ic_device))
         permissionStatusView = infoTextView()
         rotationStatusView = infoTextView()
         displayStatusView = infoTextView()
-        card.addView(permissionStatusView, textLayoutParams(topMargin = 12))
-        card.addView(rotationStatusView, textLayoutParams(topMargin = 10))
-        card.addView(displayStatusView, textLayoutParams(topMargin = 10))
+        card.addView(statusPanel(permissionStatusView, R.drawable.ic_permission), textLayoutParams(topMargin = 16))
+        card.addView(statusPanel(rotationStatusView, R.drawable.ic_clock), textLayoutParams(topMargin = 10))
+        card.addView(statusPanel(displayStatusView, R.drawable.ic_device), textLayoutParams(topMargin = 10))
         card.addView(
             actionButton("Copy diagnostics", primary = false, iconRes = R.drawable.ic_copy).apply {
-                setOnClickListener { copyDeviceDiagnostics() }
+                setOnClickListener {
+                    performConfirmHaptic()
+                    copyDeviceDiagnostics()
+                    playSuccessPulse(this)
+                }
             },
             textLayoutParams(topMargin = 14),
         )
@@ -665,7 +844,7 @@ class MainActivity : Activity() {
             hasOverlayPermission -> "Overlay ready. Tap Start to show it on the cover display."
             else -> "Overlay permission needed before starting."
         }
-        overlayPermissionContainer.visibility = if (hasOverlayPermission) View.GONE else View.VISIBLE
+        setVisibleAnimated(overlayPermissionContainer, !hasOverlayPermission, slide = true)
     }
 
     private fun renderAiLab() {
@@ -681,23 +860,23 @@ class MainActivity : Activity() {
         val hasGeneratedPack = aiLabPreferences.generatedCount > 0
         val targetCount = aiLabPreferences.generationTargetCount
 
-        configureStatusPill(
-            pill = aiModelPillView,
-            text = MODEL_DISPLAY_NAME,
-            iconRes = R.drawable.ic_status_dot,
-            iconTint = when {
-                downloadProgress.isDownloading -> APP_AMBER
-                modelReady -> APP_SUCCESS
-                modelFailed -> APP_ERROR
-                else -> APP_BORDER
-            },
-            backgroundColor = when {
-                downloadProgress.isDownloading -> APP_AMBER_SURFACE
-                modelReady -> APP_SUCCESS_SURFACE
-                modelFailed -> APP_ERROR_CONTAINER
-                else -> APP_MUTED_SURFACE
-            },
+        aiModelWarningView.text = when {
+            downloadProgress.isDownloading -> "Model downloading\nBuilt-in vocabulary remains available offline."
+            modelReady -> "Model ready\nLocal AI generation is available on this device."
+            modelFailed -> "Model download failed\nBuilt-in vocabulary remains available offline."
+            else -> "Model not downloaded\nBuilt-in vocabulary remains available offline."
+        }
+        aiModelWarningView.setTextColor(if (modelReady) APP_PRIMARY else APP_ON_ERROR_CONTAINER)
+        aiModelWarningView.background = roundedStrokeBackground(
+            color = if (modelReady) APP_SUCCESS_SURFACE else AI_WARNING_SURFACE,
+            radius = 18,
+            strokeColor = if (modelReady) APP_SUCCESS_SURFACE else APP_ERROR_CONTAINER,
         )
+        setButtonIcon(aiModelWarningView, if (modelReady) R.drawable.ic_check else R.drawable.ic_warning, if (modelReady) APP_PRIMARY else APP_ON_ERROR_CONTAINER)
+        aiModelPillView.text = "GEMMA-4-E2B-IT.LITERTLM"
+        aiModelPillView.setTextColor(APP_PRIMARY)
+        aiModelPillView.background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 8, strokeColor = APP_AI_SUBTLE_STROKE)
+        setButtonIcon(aiModelPillView, R.drawable.ic_device, APP_PRIMARY)
         configureStatusPill(
             pill = aiPackPillView,
             text = when {
@@ -723,30 +902,16 @@ class MainActivity : Activity() {
         )
         configureInfoLine(
             view = aiModelStatusView,
-            text = when {
-                downloadProgress.isDownloading -> "Downloading $MODEL_DISPLAY_NAME · ${downloadProgress.percent}%"
-                modelReady -> "$MODEL_DISPLAY_NAME is available on this device."
-                modelFailed -> "$MODEL_DISPLAY_NAME download needs attention."
-                else -> "$MODEL_DISPLAY_NAME powers local vocabulary generation."
-            },
-            iconRes = when {
-                modelFailed -> R.drawable.ic_warning
-                modelReady -> R.drawable.ic_check
-                else -> R.drawable.ic_sparkle
-            },
-            iconTint = when {
-                modelFailed -> APP_ERROR
-                modelReady -> APP_SUCCESS
-                else -> APP_SECONDARY_TEXT
-            },
+            text = "Large local model required for autonomous on-device curriculum generation.",
+            iconRes = null,
+            iconTint = APP_SECONDARY_TEXT,
         )
         aiDownloadProgressBar.progress = downloadProgress.percent
-        aiDownloadProgressBar.visibility = if (downloadProgress.isDownloading) View.VISIBLE else View.GONE
         aiDownloadProgressView.text =
-            "${downloadProgress.percent}% · ${formatBytes(downloadProgress.downloadedBytes)} of ${formatBytes(downloadProgress.totalBytes)}"
-        aiDownloadProgressView.visibility = aiDownloadProgressBar.visibility
-        aiGenerationProgressBar.visibility = if (generating) View.VISIBLE else View.GONE
-        aiGenerationStatusView.visibility = if (generating) View.VISIBLE else View.GONE
+            "${formatBytes(downloadProgress.downloadedBytes)} / ${formatBytes(downloadProgress.totalBytes)}"
+        setVisibleAnimated(aiDownloadPanelView, downloadProgress.isDownloading, slide = true)
+        setVisibleAnimated(aiGenerationProgressBar, generating, slide = true)
+        setVisibleAnimated(aiGenerationStatusView, generating, slide = true)
         configureInfoLine(
             view = aiGenerationStatusView,
             text = "Building vocabulary${animatedDots()} ${generationStepLabel(aiLabPreferences.generatedStatus)}",
@@ -756,20 +921,12 @@ class MainActivity : Activity() {
         configureInfoLine(
             view = aiGeneratedStatusView,
             text = when {
-                generatedFailed -> "Last generation failed. Recovery log appears when you reopen the app."
-                hasGeneratedPack -> "Last updated ${formatOptionalTime(aiLabPreferences.lastGenerationMillis)}"
-                else -> "Generate a local $targetCount-word pack when you want fresh practice."
+                generatedFailed -> "Creates exactly $targetCount valid Traditional Chinese entries per synthesis cycle. Last generation failed."
+                hasGeneratedPack -> "Creates exactly $targetCount valid Traditional Chinese entries per synthesis cycle. Last updated ${formatOptionalTime(aiLabPreferences.lastGenerationMillis)}."
+                else -> "Creates exactly $targetCount valid Traditional Chinese entries per synthesis cycle."
             },
-            iconRes = when {
-                generatedFailed -> R.drawable.ic_warning
-                hasGeneratedPack -> R.drawable.ic_check
-                else -> R.drawable.ic_next
-            },
-            iconTint = when {
-                generatedFailed -> APP_ERROR
-                hasGeneratedPack -> APP_SUCCESS
-                else -> APP_SECONDARY_TEXT
-            },
+            iconRes = null,
+            iconTint = APP_SECONDARY_TEXT,
         )
         configureInfoLine(
             view = aiSourceStatusView,
@@ -777,55 +934,77 @@ class MainActivity : Activity() {
             iconRes = R.drawable.ic_source,
             iconTint = APP_SECONDARY_TEXT,
         )
-        configureSelectorButton(aiSourceButton, "Source", aiLabPreferences.sourceMode.label, R.drawable.ic_source)
+        configureSourceSegment(aiSourceButton, aiLabPreferences.sourceMode == AiVocabularySourceMode.BUILT_IN_ONLY)
+        configureSourceSegment(aiSourceMixButton, aiLabPreferences.sourceMode == AiVocabularySourceMode.MIX_BOTH)
         configureSelectorButton(aiHskButton, "Level", aiLabPreferences.hskLevel.label, R.drawable.ic_level)
         configureSelectorButton(aiGenerationCountButton, "Words", targetCount.toString(), R.drawable.ic_sparkle)
         configureActionButton(
             button = aiModelActionButton,
             text = when {
-                downloadProgress.isDownloading -> "Downloading ${downloadProgress.percent}%"
+                downloadProgress.isDownloading -> "Pause"
+                modelReady -> "Model ready"
                 modelFailed -> "Retry download"
                 else -> "Download AI model"
             },
             primary = false,
-            iconRes = R.drawable.ic_download,
+            iconRes = if (downloadProgress.isDownloading) R.drawable.ic_stop else R.drawable.ic_download,
+            backgroundColor = APP_SURFACE_CONTAINER_HIGH,
+            textColor = APP_TEXT_PRIMARY,
         )
-        aiModelActionButton.visibility = if (modelReady) View.GONE else View.VISIBLE
-        aiModelActionButton.isEnabled = !downloadProgress.isDownloading && !generating
-        aiModelActionButton.alpha = if (aiModelActionButton.isEnabled) 1f else 0.55f
+        val showModelAction = !modelReady || downloadProgress.isDownloading
+        setVisibleAnimated(aiModelActionButton, showModelAction, slide = true)
+        if (showModelAction) {
+            setEnabledAnimated(aiModelActionButton, !downloadProgress.isDownloading && !generating && !modelReady)
+        } else {
+            aiModelActionButton.isEnabled = false
+        }
         configureActionButton(
             button = aiGenerateButton,
             text = when {
                 generating -> "Generating..."
-                modelReady -> "Generate $targetCount words"
-                else -> "Download model first"
+                modelReady -> "Generate Now"
+                else -> "Generate Now"
             },
             primary = true,
             iconRes = R.drawable.ic_sparkle,
+            backgroundColor = if (modelReady) APP_PRIMARY_CONTAINER else APP_DISABLED_PRIMARY,
+            textColor = APP_ON_PRIMARY,
         )
-        aiGenerateButton.isEnabled = modelReady && !generating
-        aiGenerateButton.alpha = if (aiGenerateButton.isEnabled) 1f else 0.55f
+        setEnabledAnimated(aiGenerateButton, modelReady && !generating)
+        aiGenerateRequirementView.text = when {
+            generating -> "Generation is running"
+            modelReady -> "Ready for on-device generation"
+            else -> "Requires model download completion"
+        }
+        setButtonIcon(
+            aiGenerateRequirementView,
+            if (modelReady) R.drawable.ic_check else R.drawable.ic_status_dot,
+            if (modelReady) APP_PRIMARY else APP_TEXT_SECONDARY,
+        )
+        aiGenerateRequirementView.setTextColor(if (modelReady) APP_PRIMARY else APP_TEXT_SECONDARY)
         configureActionButton(
             button = aiTimeButton,
-            text = "Daily ${formatGenerationTime()}",
+            text = formatGenerationTime(),
             primary = false,
             iconRes = R.drawable.ic_clock,
+            backgroundColor = Color.TRANSPARENT,
+            textColor = APP_PRIMARY,
         )
-        aiSourceButton.isEnabled = !generating
-        aiSourceButton.alpha = if (generating) 0.55f else 1f
-        aiHskButton.isEnabled = !generating
-        aiHskButton.alpha = if (generating) 0.55f else 1f
-        aiGenerationCountButton.isEnabled = !generating
-        aiGenerationCountButton.alpha = if (generating) 0.55f else 1f
+        setEnabledAnimated(aiSourceButton, !generating)
+        setEnabledAnimated(aiHskButton, !generating)
+        setEnabledAnimated(aiGenerationCountButton, !generating)
 
         val exactStatus = if (AiGenerationScheduler.canScheduleExact(this)) "granted" else "blocked"
         val enabled = if (aiLabPreferences.dailyGenerationEnabled) "enabled" else "off"
         aiDailySwitch.setOnCheckedChangeListener(null)
         aiDailySwitch.isChecked = aiLabPreferences.dailyGenerationEnabled
         aiDailySwitch.setOnCheckedChangeListener { _, isChecked ->
-            if (!updatingUi) handleDailyToggle(isChecked)
+            if (!updatingUi) {
+                performSelectionHaptic()
+                handleDailyToggle(isChecked)
+            }
         }
-        aiAlarmPermissionButton.visibility = if (exactStatus == "granted") View.GONE else View.VISIBLE
+        setVisibleAnimated(aiAlarmPermissionButton, exactStatus != "granted", slide = true)
         configureInfoLine(
             view = aiScheduleStatusView,
             text = "Daily $enabled · ${formatGenerationTime()} · next ${formatOptionalTime(aiLabPreferences.lastScheduledGenerationMillis)}",
@@ -834,17 +1013,16 @@ class MainActivity : Activity() {
         )
         configureActionButton(
             button = aiDeleteModelButton,
-            text = "Delete AI model",
+            text = "Save AI debug log",
             primary = false,
-            iconRes = R.drawable.ic_delete,
-            backgroundColor = APP_ERROR_CONTAINER,
-            textColor = APP_ON_ERROR_CONTAINER,
+            iconRes = R.drawable.ic_device,
+            backgroundColor = Color.TRANSPARENT,
+            textColor = APP_TEXT_SECONDARY,
         )
-        aiDeleteModelButton.visibility = if (modelReady) View.VISIBLE else View.GONE
-        aiDeleteModelButton.isEnabled = !generating
-        aiDeleteModelButton.alpha = if (aiDeleteModelButton.isEnabled) 1f else 0.55f
-        setSubtlePulse(aiModelPillView, modelReady)
+        setEnabledAnimated(aiDeleteModelButton, aiLabPreferences.pendingDebugLog.isNotBlank())
+        setSubtlePulse(aiModelPillView, downloadProgress.isDownloading)
         setSubtlePulse(aiPackPillView, generating)
+        maybePlayAiStatusSuccess(modelReady, aiLabPreferences.generatedCount)
         updatingUi = false
         updateActivityLoop(downloadProgress.isDownloading || generating)
     }
@@ -866,7 +1044,13 @@ class MainActivity : Activity() {
             }
             "Display ${display.displayId} ($marker): ${display.name}"
         }
-        return "${overlayPreferences.overlayStatus}\nMain display fallback disabled.\nOverlay scope: cover display-wide; Samsung does not expose the active cover page.\nDetected displays:\n$displays"
+        val fallbackStatus = "Main display fallback disabled."
+        val statusLines = if (overlayPreferences.overlayStatus.contains(fallbackStatus)) {
+            overlayPreferences.overlayStatus
+        } else {
+            "${overlayPreferences.overlayStatus}\n$fallbackStatus"
+        }
+        return "$statusLines\nOverlay scope: cover display-wide; Samsung does not expose the active cover page.\nDetected displays:\n$displays"
     }
 
     private fun addTextStyleControl(
@@ -884,10 +1068,10 @@ class MainActivity : Activity() {
             contentDescription = "Choose $labelPrefix color"
             isClickable = true
         }
+        val panel = controlPanel()
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(18), 0, 0)
             addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(colorButton)
         }
@@ -902,7 +1086,8 @@ class MainActivity : Activity() {
         )
         palette.visibility = View.GONE
         colorButton.setOnClickListener {
-            palette.visibility = if (palette.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            performSelectionHaptic()
+            setVisibleAnimated(palette, palette.visibility != View.VISIBLE, slide = true)
         }
 
         val seekBar = SeekBar(this).apply {
@@ -924,16 +1109,22 @@ class MainActivity : Activity() {
                     }
                 }
 
-                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                    performSelectionHaptic()
+                }
 
-                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                    performSelectionHaptic()
+                    playPreviewPulse()
+                }
             })
         }
 
         label.text = "$labelPrefix size: ${current}sp"
-        root.addView(header)
-        root.addView(seekBar, textLayoutParams(topMargin = 4))
-        root.addView(palette, textLayoutParams(topMargin = 8))
+        panel.addView(header)
+        panel.addView(seekBar, textLayoutParams(topMargin = 4))
+        panel.addView(palette, textLayoutParams(topMargin = 8))
+        root.addView(panel, textLayoutParams(topMargin = 14))
     }
 
     private fun buildPalette(selectedColor: Int, onSelected: (Int) -> Unit): LinearLayout {
@@ -961,7 +1152,9 @@ class MainActivity : Activity() {
                     contentDescription = "Use color ${colorToHex(color)}"
                     background = swatchBackground(color, selected = color == selectedColor)
                     setOnClickListener {
+                        performSelectionHaptic()
                         onSelected(color)
+                        playSuccessPulse(this)
                         for (index in 0 until row.childCount) {
                             val child = row.getChildAt(index)
                             val childColor = COLOR_PALETTE[index]
@@ -985,11 +1178,14 @@ class MainActivity : Activity() {
 
     private fun addIntervalControl(root: LinearLayout) {
         intervalStatusView = infoTextView()
-        root.addView(intervalStatusView, textLayoutParams(topMargin = 14))
+        root.addView(statusPanel(intervalStatusView, R.drawable.ic_clock), textLayoutParams(topMargin = 16))
         intervalChangeButton = actionButton("Change frequency", primary = false, iconRes = R.drawable.ic_clock).apply {
-            setOnClickListener { showIntervalOptionsDialog() }
+            setOnClickListener {
+                performSelectionHaptic()
+                showIntervalOptionsDialog()
+            }
         }
-        root.addView(intervalChangeButton, textLayoutParams(topMargin = 12))
+        root.addView(intervalChangeButton, textLayoutParams(topMargin = 10))
         updateIntervalControls()
     }
 
@@ -997,6 +1193,7 @@ class MainActivity : Activity() {
         TimePickerDialog(
             this,
             { _, hour, minute ->
+                performSelectionHaptic()
                 aiLabPreferences.dailyGenerationHour = hour
                 aiLabPreferences.dailyGenerationMinute = minute
                 if (aiLabPreferences.dailyGenerationEnabled) {
@@ -1019,6 +1216,7 @@ class MainActivity : Activity() {
             .setTitle("Generated source")
             .setSingleChoiceItems(labels, selected) { dialog, which ->
                 dialog.dismiss()
+                performSelectionHaptic()
                 aiLabPreferences.sourceMode = modes[which]
                 repository.pinWord(repository.currentWord())
                 refreshOverlay()
@@ -1036,6 +1234,7 @@ class MainActivity : Activity() {
             .setTitle("HSK level")
             .setSingleChoiceItems(labels, selected) { dialog, which ->
                 dialog.dismiss()
+                performSelectionHaptic()
                 aiLabPreferences.hskLevel = levels[which]
                 render()
             }
@@ -1051,6 +1250,7 @@ class MainActivity : Activity() {
             .setTitle("Words per pack")
             .setSingleChoiceItems(labels.toTypedArray(), currentIndex) { dialog, which ->
                 dialog.dismiss()
+                performSelectionHaptic()
                 if (which < presets.size) {
                     aiLabPreferences.generationTargetCount = presets[which]
                     render()
@@ -1080,6 +1280,7 @@ class MainActivity : Activity() {
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Done") { _, _ ->
                 val value = input.text.toString().toIntOrNull() ?: return@setPositiveButton
+                performSelectionHaptic()
                 val normalized = value.coerceIn(
                     AiLabPreferences.MIN_GENERATION_TARGET_COUNT,
                     AiLabPreferences.MAX_GENERATION_TARGET_COUNT,
@@ -1116,8 +1317,8 @@ class MainActivity : Activity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = roundedBackground(APP_MUTED_SURFACE, radius = 18)
-            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 22, strokeColor = APP_AI_SUBTLE_STROKE)
+            setPadding(dp(16), dp(10), dp(14), dp(10))
             attachPressFeedback(this)
         }
         row.addView(
@@ -1133,19 +1334,25 @@ class MainActivity : Activity() {
         autoHideSwitch = Switch(this).apply {
             isChecked = overlayPreferences.autoHideEnabled
             setOnCheckedChangeListener { _, isChecked ->
-                if (!updatingUi) handleAutoHideToggle(isChecked)
+                if (!updatingUi) {
+                    performSelectionHaptic()
+                    handleAutoHideToggle(isChecked)
+                }
             }
         }
         row.addView(autoHideSwitch)
-        root.addView(row, textLayoutParams(topMargin = 18))
+        root.addView(row, textLayoutParams(topMargin = 14))
 
         autoHideStatusView = infoTextView()
-        root.addView(autoHideStatusView, textLayoutParams(topMargin = 8))
+        root.addView(statusPanel(autoHideStatusView, R.drawable.ic_repeat), textLayoutParams(topMargin = 10))
 
         autoHideDurationButton = actionButton("Visible duration", primary = false, iconRes = R.drawable.ic_clock).apply {
-            setOnClickListener { showAutoHideOptionsDialog() }
+            setOnClickListener {
+                performSelectionHaptic()
+                showAutoHideOptionsDialog()
+            }
         }
-        root.addView(autoHideDurationButton, textLayoutParams(topMargin = 12))
+        root.addView(autoHideDurationButton, textLayoutParams(topMargin = 10))
         updateAutoHideControls()
     }
 
@@ -1174,8 +1381,7 @@ class MainActivity : Activity() {
             primary = false,
             iconRes = R.drawable.ic_clock,
         )
-        autoHideDurationButton.isEnabled = enabled
-        autoHideDurationButton.alpha = if (enabled) 1f else 0.55f
+        setEnabledAnimated(autoHideDurationButton, enabled)
     }
 
     private fun showAutoHideOptionsDialog() {
@@ -1194,6 +1400,7 @@ class MainActivity : Activity() {
             .setTitle("Hide floating text after")
             .setSingleChoiceItems(labels.toTypedArray(), currentIndex) { dialog, which ->
                 dialog.dismiss()
+                performSelectionHaptic()
                 setAutoHideSeconds(presets[which].seconds)
             }
             .show()
@@ -1215,6 +1422,7 @@ class MainActivity : Activity() {
             .setTitle("Change word every")
             .setSingleChoiceItems(labels.toTypedArray(), currentIndex) { dialog, which ->
                 dialog.dismiss()
+                performSelectionHaptic()
                 if (which < presets.size) {
                     setRotationInterval(presets[which].seconds)
                 } else {
@@ -1272,6 +1480,7 @@ class MainActivity : Activity() {
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Done") { _, _ ->
                 val value = input.text.toString().toIntOrNull() ?: return@setPositiveButton
+                performSelectionHaptic()
                 val multiplier = when (unitSpinner.selectedItemPosition) {
                     2 -> 3600
                     1 -> 60
@@ -1305,23 +1514,268 @@ class MainActivity : Activity() {
         if (aiFailurePromptShowing) return
 
         aiFailurePromptShowing = true
-        AlertDialog.Builder(this)
-            .setTitle("Save AI debug log?")
-            .setMessage("AI vocabulary generation failed. Save a text log so it can be shared for debugging?")
-            .setPositiveButton("Save log") { _, _ ->
+        val dialog = Dialog(this).apply {
+            window?.setBackgroundDrawableResource(android.R.color.transparent)
+            setCanceledOnTouchOutside(true)
+        }
+        val diagnostics = aiFailureDiagnostics()
+        val root = ScrollView(this).apply {
+            setPadding(dp(18), dp(24), dp(18), dp(24))
+            isFillViewport = true
+            overScrollMode = View.OVER_SCROLL_NEVER
+            clipToPadding = false
+        }
+        val rootContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedBackground(APP_SURFACE, radius = 34)
+            clipToOutline = true
+            applySoftElevation(this, NAV_ELEVATION_DP)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            background = DottedWarningDrawable(
+                backgroundColor = AI_FAILURE_HEADER,
+                dotColor = AI_FAILURE_DOT,
+                radiusPx = dp(34).toFloat(),
+                density = resources.displayMetrics.density,
+            )
+            setPadding(dp(24), dp(26), dp(24), dp(24))
+            addView(
+                iconBadge(
+                    iconRes = R.drawable.ic_warning,
+                    iconTint = APP_ON_PRIMARY,
+                    backgroundColor = APP_ERROR,
+                    sizeDp = 60,
+                ),
+                LinearLayout.LayoutParams(dp(60), dp(60)),
+            )
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = "AI generation did not\ncomplete"
+                    setTextColor(APP_ON_ERROR_CONTAINER)
+                    textSize = 24f
+                    gravity = Gravity.CENTER
+                    typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
+                    includeFontPadding = true
+                    setLineSpacing(0f, 1f)
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = dp(14)
+                },
+            )
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(26), dp(24), dp(26), dp(24))
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = "Your built-in vocabulary is still active.\nYou can save a debug log to help us identify the issue, or dismiss this message to continue learning."
+                    setTextColor(APP_TEXT_PRIMARY)
+                    textSize = 16f
+                    gravity = Gravity.CENTER
+                    includeFontPadding = true
+                    setLineSpacing(dp(3).toFloat(), 1f)
+                },
+            )
+            addView(
+                buildFailureDiagnosticPanel(diagnostics),
+                textLayoutParams(topMargin = 22),
+            )
+            val saveButton = actionButton("Save debug log", primary = true, iconRes = R.drawable.ic_copy).apply {
+                textSize = 16f
+                minHeight = dp(58)
+                configureActionButton(
+                    button = this,
+                    text = "Save debug log",
+                    primary = true,
+                    iconRes = R.drawable.ic_copy,
+                    backgroundColor = APP_PRIMARY_CONTAINER,
+                    textColor = APP_ON_PRIMARY,
+                )
+                setOnClickListener {
+                    performActionHaptic()
+                    aiLabPreferences.promptedFailureLogId = failureId
+                    saveAiDebugLog()
+                    dialog.dismiss()
+                }
+            }
+            val dismissButton = actionButton("Dismiss", primary = false).apply {
+                textSize = 16f
+                minHeight = dp(58)
+                background = roundedStrokeBackground(APP_SURFACE, radius = 29, strokeColor = APP_BORDER)
+                setTextColor(APP_PRIMARY)
+                setOnClickListener {
+                    performSelectionHaptic()
+                    aiLabPreferences.promptedFailureLogId = failureId
+                    dialog.dismiss()
+                }
+            }
+            addView(saveButton, textLayoutParams(topMargin = 24))
+            addView(dismissButton, textLayoutParams(topMargin = 14))
+        }
+        card.addView(header, textLayoutParams())
+        card.addView(body, textLayoutParams())
+        rootContent.addView(
+            card,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        root.addView(
+            rootContent,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        dialog.setContentView(root)
+        dialog.setOnCancelListener {
+            aiLabPreferences.promptedFailureLogId = failureId
+        }
+        dialog.setOnDismissListener {
+            if (aiFailurePromptShowing) {
                 aiLabPreferences.promptedFailureLogId = failureId
-                saveAiDebugLog()
                 aiFailurePromptShowing = false
             }
-            .setNegativeButton("Not now") { _, _ ->
-                aiLabPreferences.promptedFailureLogId = failureId
-                aiFailurePromptShowing = false
-            }
-            .setOnCancelListener {
-                aiLabPreferences.promptedFailureLogId = failureId
-                aiFailurePromptShowing = false
-            }
-            .show()
+        }
+        dialog.window?.setDimAmount(0.42f)
+        dialog.show()
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+    }
+
+    private fun buildFailureDiagnosticPanel(diagnostics: AiFailureDiagnostics): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 14, strokeColor = APP_AI_SUBTLE_STROKE)
+            setPadding(dp(18), dp(16), dp(18), dp(16))
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = "DIAGNOSTIC DETAILS"
+                            setTextColor(APP_TEXT_PRIMARY)
+                            textSize = 12f
+                            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
+                            includeFontPadding = false
+                        },
+                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                    )
+                    addView(
+                        ImageView(this@MainActivity).apply {
+                            setImageResource(R.drawable.ic_device)
+                            imageTintList = ColorStateList.valueOf(APP_TEXT_SECONDARY)
+                            contentDescription = null
+                        },
+                        LinearLayout.LayoutParams(dp(24), dp(24)),
+                    )
+                },
+            )
+            addView(View(this@MainActivity).apply { setBackgroundColor(APP_AI_SUBTLE_STROKE) }, textLayoutParams(topMargin = 14).apply {
+                height = dp(1)
+            })
+            addDiagnosticRow(
+                label = "Accepted entries:",
+                value = diagnostics.acceptedEntries,
+                valueColor = APP_TEXT_PRIMARY,
+                pill = true,
+                topMargin = 16,
+            )
+            addDiagnosticRow(
+                label = "Backend:",
+                value = diagnostics.backend,
+                valueColor = APP_ON_ERROR_CONTAINER,
+                icon = "⊗",
+                topMargin = 14,
+            )
+            addDiagnosticRow(
+                label = "Model file:",
+                value = diagnostics.modelFile,
+                valueColor = APP_PRIMARY,
+                icon = if (diagnostics.modelPresent) "⊙" else "⊗",
+                topMargin = 14,
+            )
+        }
+
+    private fun LinearLayout.addDiagnosticRow(
+        label: String,
+        value: String,
+        valueColor: Int,
+        icon: String? = null,
+        pill: Boolean = false,
+        topMargin: Int,
+    ) {
+        addView(
+            LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = label
+                        setTextColor(APP_TEXT_PRIMARY)
+                        textSize = 15f
+                        includeFontPadding = false
+                        isSingleLine = true
+                    },
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, if (pill) 1f else 0.46f),
+                )
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = if (icon == null) value else "$icon $value"
+                        setTextColor(valueColor)
+                        textSize = 15f
+                        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
+                        includeFontPadding = false
+                        gravity = Gravity.CENTER_VERTICAL or Gravity.END
+                        isSingleLine = true
+                        if (pill) {
+                            background = roundedBackground(APP_SURFACE_CONTAINER_HIGH, radius = 6)
+                            setPadding(dp(12), dp(6), dp(12), dp(6))
+                        }
+                    },
+                    if (pill) {
+                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    } else {
+                        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.54f)
+                    },
+                )
+            },
+            textLayoutParams(topMargin = topMargin),
+        )
+    }
+
+    private fun aiFailureDiagnostics(): AiFailureDiagnostics {
+        val pendingLog = aiLabPreferences.pendingDebugLog
+        val accepted = Regex("""Valid entries accepted:\s*([^\n]+)""")
+            .find(pendingLog)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            ?.takeUnless { it == "not available" }
+            ?: aiLabPreferences.generatedCount.takeIf { it > 0 }?.toString()
+            ?: "0"
+        val backendReason = aiLabPreferences.generatedStatus
+            .substringAfter("${AiLabPreferences.GENERATED_FAILED}:", missingDelimiterValue = "failed")
+            .trim()
+            .ifBlank { "failed" }
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
+        val modelPresent = aiModelManager.modelFile().exists()
+        return AiFailureDiagnostics(
+            acceptedEntries = "$accepted / ${aiLabPreferences.generationTargetCount}",
+            backend = backendReason.ellipsizeEnd(13),
+            modelFile = if (modelPresent) "Present" else "Missing",
+            modelPresent = modelPresent,
+        )
     }
 
     private fun saveAiDebugLog() {
@@ -1427,14 +1881,10 @@ class MainActivity : Activity() {
 
     private fun animateWordChange() {
         listOf(hanziView, pinyinView, englishView).forEachIndexed { index, view ->
-            view.alpha = 0f
-            view.translationY = dp(8).toFloat()
-            view.animate()
-                .alpha(1f)
-                .translationY(0f)
-                .setStartDelay(index * 45L)
-                .setDuration(180L)
-                .start()
+            animateContentIn(view, startDelay = index * WORD_STAGGER_MS)
+        }
+        listOf(nextWordMetricView, bucketMetricView, frequencyMetricView, overlayStatusView).forEachIndexed { index, view ->
+            animateStatusRefresh(view, startDelay = 90L + index * 28L)
         }
     }
 
@@ -1523,27 +1973,17 @@ class MainActivity : Activity() {
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2), 0, dp(2))
             addView(
-                LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    addView(
-                        TextView(this@MainActivity).apply {
-                            text = getString(R.string.app_name)
-                            setTextColor(APP_TEXT_PRIMARY)
-                            textSize = 28f
-                            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
-                            includeFontPadding = false
-                        },
-                    )
-                    addView(
-                        TextView(this@MainActivity).apply {
-                            text = "Cover-screen Chinese practice"
-                            setTextColor(APP_TEXT_SECONDARY)
-                            textSize = 13f
-                            includeFontPadding = false
-                            setPadding(0, dp(6), 0, 0)
-                        },
-                    )
+                TextView(this@MainActivity).apply {
+                    topTitleView = this
+                    text = activeTab.title
+                    setTextColor(APP_TEXT_PRIMARY)
+                    textSize = 28f
+                    typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                    includeFontPadding = false
+                    gravity = Gravity.CENTER_VERTICAL
+                    minHeight = dp(48)
                 },
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
@@ -1554,6 +1994,7 @@ class MainActivity : Activity() {
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     background = roundedBackground(APP_SURFACE, radius = 18)
                     setPadding(dp(6), dp(6), dp(6), dp(6))
+                    applySoftElevation(this, AI_CARD_ELEVATION_DP)
                 },
                 LinearLayout.LayoutParams(dp(48), dp(48)),
             )
@@ -1565,39 +2006,40 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             clipChildren = false
             clipToPadding = false
-            background = roundedStrokeBackground(APP_SURFACE, radius = 32, strokeColor = APP_OUTLINE_VARIANT)
-            setPadding(dp(6), dp(6), dp(6), dp(6))
+            background = roundedStrokeBackground(APP_SURFACE, radius = 0, strokeColor = APP_AI_SUBTLE_STROKE)
+            setPadding(dp(18), dp(8), dp(18), dp(8))
             applySoftElevation(this, NAV_ELEVATION_DP)
             AppTab.values().forEach { tab ->
                 addView(
                     tabButton(tab),
                     LinearLayout.LayoutParams(
                         0,
-                        dp(56),
+                        dp(64),
                         1f,
                     ).apply {
-                        marginEnd = if (tab == AppTab.values().last()) 0 else dp(4)
+                        marginEnd = if (tab == AppTab.values().last()) 0 else dp(8)
                     },
                 )
             }
         }
 
-    private fun tabButton(tab: AppTab): TextView =
-        TextView(this).apply {
-            text = tab.title
+    private fun tabButton(tab: AppTab): ImageView =
+        ImageView(this).apply {
             contentDescription = tab.title
-            gravity = Gravity.CENTER
+            setImageResource(tab.iconRes)
+            scaleType = ImageView.ScaleType.FIT_CENTER
             isClickable = true
             isFocusable = true
-            includeFontPadding = false
-            textSize = 11f
-            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
-            setPadding(dp(6), dp(5), dp(6), dp(4))
+            minimumHeight = dp(48)
+            minimumWidth = dp(48)
+            setPadding(0, dp(18), 0, dp(18))
             attachPressFeedback(this)
             setOnClickListener {
                 if (activeTab == tab) return@setOnClickListener
+                performSelectionHaptic()
                 activeTab = tab
                 updateVisibleSection(animate = true)
+                scrollMainContentToTop(animate = true)
                 render()
             }
             tabButtons[tab] = this
@@ -1616,32 +2058,34 @@ class MainActivity : Activity() {
             section.visibility = if (section == activeSection) View.VISIBLE else View.GONE
         }
         if (animate) {
-            activeSection.alpha = 0f
-            activeSection.translationY = dp(8).toFloat()
-            activeSection.animate()
-                .alpha(1f)
-                .translationY(0f)
-                .setDuration(180L)
-                .start()
+            animateContentIn(activeSection)
+        }
+        if (::topTitleView.isInitialized) {
+            topTitleView.text = activeTab.title
         }
         updateTabStyles()
+    }
+
+    private fun scrollMainContentToTop(animate: Boolean) {
+        if (!::mainScrollView.isInitialized) return
+
+        mainScrollView.post {
+            if (animate && animationsEnabled()) {
+                mainScrollView.smoothScrollTo(0, 0)
+            } else {
+                mainScrollView.scrollTo(0, 0)
+            }
+        }
     }
 
     private fun updateTabStyles() {
         tabButtons.forEach { (tab, button) ->
             val selected = tab == activeTab
             val tint = if (selected) APP_PRIMARY else APP_TEXT_SECONDARY
-            button.setTextColor(tint)
             button.alpha = if (selected) 1f else 0.74f
-            button.typeface = Typeface.create(SANS_FAMILY, if (selected) Typeface.BOLD else Typeface.NORMAL)
-            button.background = roundedBackground(if (selected) APP_SUCCESS_SURFACE else Color.TRANSPARENT, radius = 26)
-            setTopButtonIcon(button, tab.iconRes, tint)
-            button.animate()
-                .scaleX(if (selected) 1f else 0.96f)
-                .scaleY(if (selected) 1f else 0.96f)
-                .translationZ(if (selected) dp(1).toFloat() else 0f)
-                .setDuration(160L)
-                .start()
+            button.background = roundedBackground(if (selected) APP_SUCCESS_SURFACE else Color.TRANSPARENT, radius = 28)
+            setNavigationTabIcon(button, tab.iconRes, tint)
+            animateTabState(button, selected)
         }
     }
 
@@ -1685,6 +2129,182 @@ class MainActivity : Activity() {
             setPadding(dp(22), dp(22), dp(22), dp(22))
         }
 
+    private fun appCard(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedStrokeBackground(APP_SURFACE, radius = 28, strokeColor = APP_AI_SUBTLE_STROKE)
+            applySoftElevation(this, AI_CARD_ELEVATION_DP)
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+        }
+
+    private fun aiCard(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedStrokeBackground(APP_SURFACE, radius = 28, strokeColor = APP_AI_SUBTLE_STROKE)
+            applySoftElevation(this, AI_CARD_ELEVATION_DP)
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+        }
+
+    private fun appSectionHeader(title: String, subtitle: String, iconRes: Int): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                iconBadge(
+                    iconRes = iconRes,
+                    iconTint = APP_PRIMARY,
+                    backgroundColor = APP_SUCCESS_SURFACE,
+                    sizeDp = 44,
+                ),
+                LinearLayout.LayoutParams(dp(44), dp(44)),
+            )
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(14), 0, 0, 0)
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = title
+                            setTextColor(APP_TEXT_PRIMARY)
+                            textSize = 22f
+                            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                            includeFontPadding = false
+                        },
+                    )
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = subtitle
+                            setTextColor(APP_TEXT_SECONDARY)
+                            textSize = 13f
+                            typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
+                            includeFontPadding = true
+                            setPadding(0, dp(5), 0, 0)
+                        },
+                    )
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+        }
+
+    private fun aiSectionHeader(title: String, subtitle: String, iconRes: Int): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                iconBadge(
+                    iconRes = iconRes,
+                    iconTint = APP_PRIMARY,
+                    backgroundColor = APP_SUCCESS_SURFACE,
+                    sizeDp = 44,
+                ),
+                LinearLayout.LayoutParams(dp(44), dp(44)),
+            )
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(14), 0, 0, 0)
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = title
+                            setTextColor(APP_TEXT_PRIMARY)
+                            textSize = 22f
+                            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                            includeFontPadding = false
+                        },
+                    )
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = subtitle
+                            setTextColor(APP_TEXT_SECONDARY)
+                            textSize = 13f
+                            typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
+                            includeFontPadding = true
+                            setPadding(0, dp(5), 0, 0)
+                        },
+                    )
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+        }
+
+    private fun controlPanel(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 22, strokeColor = APP_AI_SUBTLE_STROKE)
+            setPadding(dp(16), dp(14), dp(16), dp(12))
+        }
+
+    private fun statusPanel(textView: TextView, iconRes: Int): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+            background = roundedBackground(APP_MUTED_SURFACE, radius = 20)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            addView(
+                iconBadge(
+                    iconRes = iconRes,
+                    iconTint = APP_SECONDARY_TEXT,
+                    backgroundColor = APP_SURFACE,
+                    sizeDp = 36,
+                ),
+                LinearLayout.LayoutParams(dp(36), dp(36)),
+            )
+            textView.setPadding(dp(12), 0, 0, 0)
+            addView(textView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+
+    private fun aiMetaRow(label: String, value: String, iconRes: Int): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundedBackground(APP_MUTED_SURFACE, radius = 20)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            addView(
+                iconBadge(
+                    iconRes = iconRes,
+                    iconTint = APP_SECONDARY_TEXT,
+                    backgroundColor = APP_SURFACE,
+                    sizeDp = 36,
+                ),
+                LinearLayout.LayoutParams(dp(36), dp(36)),
+            )
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), 0, 0, 0)
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = label.uppercase(Locale.US)
+                            setTextColor(APP_TEXT_SECONDARY)
+                            textSize = 11f
+                            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                            includeFontPadding = false
+                        },
+                    )
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = value
+                            setTextColor(APP_PRIMARY)
+                            textSize = 12f
+                            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                            includeFontPadding = false
+                            setPadding(0, dp(5), 0, 0)
+                        },
+                    )
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+        }
+
+    private fun iconBadge(iconRes: Int, iconTint: Int, backgroundColor: Int, sizeDp: Int): ImageView =
+        ImageView(this).apply {
+            setImageResource(iconRes)
+            imageTintList = ColorStateList.valueOf(iconTint)
+            contentDescription = null
+            background = roundedBackground(backgroundColor, radius = sizeDp / 2)
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+        }
+
     private fun actionButton(text: String, primary: Boolean, iconRes: Int? = null): TextView =
         TextView(this).apply {
             gravity = Gravity.CENTER
@@ -1717,8 +2337,8 @@ class MainActivity : Activity() {
     private fun configureSelectorButton(button: TextView, label: String, value: String, iconRes: Int) {
         button.text = "$label: $value"
         button.setTextColor(APP_TEXT_PRIMARY)
-        button.background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 20, strokeColor = APP_OUTLINE_VARIANT)
-        setButtonIcon(button, iconRes, APP_SECONDARY_TEXT)
+        button.background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 18, strokeColor = APP_AI_SUBTLE_STROKE)
+        setButtonIcon(button, iconRes, APP_PRIMARY)
     }
 
     private fun configureActionButton(
@@ -1742,11 +2362,9 @@ class MainActivity : Activity() {
         button.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null)
     }
 
-    private fun setTopButtonIcon(button: TextView, iconRes: Int, color: Int) {
-        val icon = getDrawable(iconRes)?.mutate()
-        icon?.setTint(color)
-        button.compoundDrawablePadding = dp(2)
-        button.setCompoundDrawablesWithIntrinsicBounds(null, icon, null, null)
+    private fun setNavigationTabIcon(button: ImageView, iconRes: Int, color: Int) {
+        button.setImageResource(iconRes)
+        button.imageTintList = ColorStateList.valueOf(color)
     }
 
     private fun infoTextView(): TextView =
@@ -1793,16 +2411,40 @@ class MainActivity : Activity() {
     private fun buildFeaturePill(text: String): TextView =
         TextView(this).apply {
             this.text = text
-            setTextColor(APP_TEXT_PRIMARY)
-            textSize = 12f
+            setTextColor(APP_TEXT_SECONDARY)
+            textSize = 13f
             typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
             includeFontPadding = false
-            minHeight = dp(40)
+            minHeight = dp(54)
             gravity = Gravity.CENTER_VERTICAL
-            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 20, strokeColor = APP_OUTLINE_VARIANT)
-            setPadding(dp(14), 0, dp(14), 0)
+            background = roundedStrokeBackground(APP_BACKGROUND, radius = 27, strokeColor = APP_AI_SUBTLE_STROKE)
+            setPadding(dp(18), 0, dp(22), 0)
             setButtonIcon(this, R.drawable.ic_check, APP_PRIMARY)
         }
+
+    private fun sourceSegmentButton(text: String): TextView =
+        TextView(this).apply {
+            this.text = text
+            setTextColor(APP_TEXT_SECONDARY)
+            textSize = 16f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            includeFontPadding = false
+            gravity = Gravity.CENTER
+            minHeight = dp(58)
+            isClickable = true
+            isFocusable = true
+            attachPressFeedback(this)
+        }
+
+    private fun configureSourceSegment(button: TextView, selected: Boolean) {
+        button.setTextColor(if (selected) APP_PRIMARY else APP_TEXT_SECONDARY)
+        button.background = if (selected) {
+            roundedStrokeBackground(APP_SURFACE, radius = 16, strokeColor = APP_AI_SUBTLE_STROKE)
+        } else {
+            roundedBackground(Color.TRANSPARENT, radius = 16)
+        }
+        button.elevation = if (selected) dp(1).toFloat() else 0f
+    }
 
     private fun configureStatusPill(
         pill: TextView,
@@ -1822,7 +2464,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun configureInfoLine(view: TextView, text: String, iconRes: Int, iconTint: Int) {
+    private fun configureInfoLine(view: TextView, text: String, iconRes: Int?, iconTint: Int) {
         view.text = text
         view.setTextColor(if (iconTint == APP_ERROR) APP_ON_ERROR_CONTAINER else APP_TEXT_SECONDARY)
         setButtonIcon(view, iconRes, iconTint)
@@ -1850,6 +2492,15 @@ class MainActivity : Activity() {
             setColor(color)
         }
 
+    private fun roundedGradientBackground(startColor: Int, endColor: Int, radius: Int): GradientDrawable =
+        GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(startColor, endColor),
+        ).apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(radius).toFloat()
+        }
+
     private fun roundedStrokeBackground(color: Int, radius: Int, strokeColor: Int): GradientDrawable =
         roundedBackground(color, radius).apply {
             setStroke(dp(1), strokeColor)
@@ -1874,35 +2525,226 @@ class MainActivity : Activity() {
         view.setOnTouchListener { touchedView, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    touchedView.animate()
-                        .scaleX(0.97f)
-                        .scaleY(0.97f)
-                        .alpha(0.88f)
-                        .translationZ(dp(2).toFloat())
-                        .setDuration(90L)
-                        .start()
+                    if (animationsEnabled()) {
+                        touchedView.animate()
+                            .scaleX(0.97f)
+                            .scaleY(0.97f)
+                            .alpha(0.88f)
+                            .translationZ(dp(2).toFloat())
+                            .setDuration(PRESS_DURATION_MS)
+                            .setInterpolator(DecelerateInterpolator())
+                            .start()
+                    }
                 }
 
                 MotionEvent.ACTION_UP,
                 MotionEvent.ACTION_CANCEL -> {
-                    touchedView.animate()
-                        .scaleX(1f)
-                        .scaleY(1f)
-                        .alpha(1f)
-                        .translationZ(0f)
-                        .setDuration(140L)
-                        .start()
+                    if (animationsEnabled()) {
+                        touchedView.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .alpha(1f)
+                            .translationZ(0f)
+                            .setDuration(RELEASE_DURATION_MS)
+                            .setInterpolator(DecelerateInterpolator())
+                            .start()
+                    } else {
+                        touchedView.scaleX = 1f
+                        touchedView.scaleY = 1f
+                        touchedView.alpha = 1f
+                        touchedView.translationZ = 0f
+                    }
                 }
             }
             false
         }
     }
 
+    private fun animateContentIn(view: View, startDelay: Long = 0L) {
+        if (!animationsEnabled()) {
+            view.alpha = 1f
+            view.translationY = 0f
+            return
+        }
+
+        view.animate().cancel()
+        view.alpha = 0f
+        view.translationY = dp(8).toFloat()
+        view.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setStartDelay(startDelay)
+            .setDuration(CONTENT_ENTER_DURATION_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    private fun animateStatusRefresh(view: View, startDelay: Long = 0L) {
+        if (!animationsEnabled()) return
+
+        view.animate().cancel()
+        view.alpha = 0.72f
+        view.translationY = dp(3).toFloat()
+        view.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setStartDelay(startDelay)
+            .setDuration(STATE_CHANGE_DURATION_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    private fun animateTabState(view: View, selected: Boolean) {
+        if (!animationsEnabled()) {
+            view.scaleX = if (selected) 1f else 0.96f
+            view.scaleY = if (selected) 1f else 0.96f
+            view.translationZ = if (selected) dp(1).toFloat() else 0f
+            return
+        }
+
+        view.animate()
+            .scaleX(if (selected) 1f else 0.96f)
+            .scaleY(if (selected) 1f else 0.96f)
+            .translationZ(if (selected) dp(1).toFloat() else 0f)
+            .setDuration(STATE_CHANGE_DURATION_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    private fun setVisibleAnimated(view: View, visible: Boolean, slide: Boolean = false) {
+        val targetVisibility = if (visible) View.VISIBLE else View.GONE
+
+        view.animate().cancel()
+        if (view.visibility == targetVisibility) {
+            if (visible) {
+                view.alpha = 1f
+                view.translationY = 0f
+            }
+            return
+        }
+
+        if (!animationsEnabled()) {
+            view.visibility = targetVisibility
+            view.alpha = 1f
+            view.translationY = 0f
+            return
+        }
+
+        if (visible) {
+            view.visibility = View.VISIBLE
+            view.alpha = 0f
+            if (slide) view.translationY = dp(6).toFloat()
+            view.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(STATE_CHANGE_DURATION_MS)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        } else {
+            view.animate()
+                .alpha(0f)
+                .translationY(if (slide) dp(4).toFloat() else 0f)
+                .setDuration(STATE_CHANGE_DURATION_MS)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction {
+                    view.visibility = View.GONE
+                    view.alpha = 1f
+                    view.translationY = 0f
+                }
+                .start()
+        }
+    }
+
+    private fun setEnabledAnimated(view: View, enabled: Boolean, disabledAlpha: Float = 0.55f) {
+        view.isEnabled = enabled
+        val targetAlpha = if (enabled) 1f else disabledAlpha
+        view.animate().cancel()
+        if (!animationsEnabled()) {
+            view.alpha = targetAlpha
+            return
+        }
+
+        if (view.alpha == targetAlpha) {
+            view.alpha = targetAlpha
+            return
+        }
+        view.animate()
+            .alpha(targetAlpha)
+            .setDuration(STATE_CHANGE_DURATION_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    private fun playPreviewPulse() {
+        listOf(previewHanziView, previewPinyinView, previewEnglishView).forEachIndexed { index, view ->
+            playSuccessPulse(view, startDelay = index * 24L)
+        }
+    }
+
+    private fun playSuccessPulse(view: View, startDelay: Long = 0L) {
+        if (!animationsEnabled()) return
+
+        view.animate().cancel()
+        view.animate()
+            .scaleX(1.035f)
+            .scaleY(1.035f)
+            .translationZ(dp(2).toFloat())
+            .setStartDelay(startDelay)
+            .setDuration(PULSE_DURATION_MS)
+            .setInterpolator(OvershootInterpolator(1.4f))
+            .withEndAction {
+                view.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .translationZ(0f)
+                    .setDuration(RELEASE_DURATION_MS)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
+            .start()
+    }
+
+    private fun maybePlayAiStatusSuccess(modelReady: Boolean, generatedCount: Int) {
+        val previousModelReady = lastRenderedModelReady
+        if (previousModelReady == false && modelReady) {
+            performConfirmHaptic()
+            playSuccessPulse(aiModelPillView)
+        }
+        lastRenderedModelReady = modelReady
+
+        val previousGeneratedCount = lastRenderedGeneratedCount
+        if (previousGeneratedCount != null && previousGeneratedCount <= 0 && generatedCount > 0) {
+            performConfirmHaptic()
+            playSuccessPulse(aiPackPillView)
+        }
+        lastRenderedGeneratedCount = generatedCount
+    }
+
+    private fun performSelectionHaptic() {
+        window.decorView.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+    }
+
+    private fun performActionHaptic() {
+        window.decorView.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+    }
+
+    private fun performConfirmHaptic() {
+        val feedback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            HapticFeedbackConstants.CONFIRM
+        } else {
+            HapticFeedbackConstants.VIRTUAL_KEY
+        }
+        window.decorView.performHapticFeedback(feedback)
+    }
+
+    private fun animationsEnabled(): Boolean =
+        ValueAnimator.areAnimatorsEnabled()
+
     private fun setSubtlePulse(view: View, active: Boolean) {
-        if (active) {
+        if (active && animationsEnabled()) {
             if (view.animation == null) {
-                val pulse = AlphaAnimation(0.72f, 1f).apply {
-                    duration = 900L
+                val pulse = AlphaAnimation(0.82f, 1f).apply {
+                    duration = RUNNING_PULSE_DURATION_MS
                     repeatMode = Animation.REVERSE
                     repeatCount = Animation.INFINITE
                 }
@@ -1934,6 +2776,11 @@ class MainActivity : Activity() {
     private fun colorToHex(color: Int): String =
         String.format(Locale.US, "#%06X", 0xFFFFFF and color)
 
+    private fun String.ellipsizeEnd(maxChars: Int): String {
+        if (length <= maxChars) return this
+        return "${take((maxChars - 3).coerceAtLeast(1))}..."
+    }
+
     private fun configureSystemBars() {
         window.statusBarColor = APP_BACKGROUND
         window.navigationBarColor = APP_BACKGROUND
@@ -1950,13 +2797,18 @@ class MainActivity : Activity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun applySystemBarPadding(root: View) {
+    private fun applySystemBarPadding(contentShell: View, contentRoot: View, bottomNavigation: View) {
         val baseLeft = dp(18)
         val baseTop = dp(18)
         val baseRight = dp(18)
-        val baseBottom = dp(24)
-        root.setPadding(baseLeft, baseTop, baseRight, baseBottom)
-        root.setOnApplyWindowInsetsListener { view, insets ->
+        val contentTop = dp(18)
+        val contentBottom = dp(112)
+        val navTop = dp(8)
+        val navBottom = dp(8)
+        contentShell.setPadding(baseLeft, baseTop, baseRight, 0)
+        contentRoot.setPadding(0, contentTop, 0, contentBottom)
+        bottomNavigation.setPadding(baseLeft, navTop, baseRight, navBottom)
+        contentShell.setOnApplyWindowInsetsListener { _, insets ->
             val topInset: Int
             val bottomInset: Int
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -1967,12 +2819,14 @@ class MainActivity : Activity() {
                 topInset = insets.systemWindowInsetTop
                 bottomInset = insets.systemWindowInsetBottom
             }
-            view.setPadding(
+            contentShell.setPadding(
                 baseLeft,
                 baseTop + topInset,
                 baseRight,
-                baseBottom + bottomInset,
+                0,
             )
+            contentRoot.setPadding(0, contentTop, 0, contentBottom + bottomInset)
+            bottomNavigation.setPadding(baseLeft, navTop, baseRight, navBottom + bottomInset)
             insets
         }
     }
@@ -1988,10 +2842,79 @@ class MainActivity : Activity() {
 
     private data class IntervalPreset(val label: String, val seconds: Int)
 
+    private data class AiFailureDiagnostics(
+        val acceptedEntries: String,
+        val backend: String,
+        val modelFile: String,
+        val modelPresent: Boolean,
+    )
+
+    private class DottedWarningDrawable(
+        private val backgroundColor: Int,
+        private val dotColor: Int,
+        private val radiusPx: Float,
+        density: Float,
+    ) : Drawable() {
+        private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = backgroundColor
+            style = Paint.Style.FILL
+        }
+        private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = dotColor
+            style = Paint.Style.FILL
+        }
+        private val path = Path()
+        private val rect = RectF()
+        private val dotRadius = 1.2f * density
+        private val dotGap = 12f * density
+
+        override fun draw(canvas: Canvas) {
+            rect.set(bounds)
+            path.reset()
+            path.addRoundRect(
+                rect,
+                floatArrayOf(radiusPx, radiusPx, radiusPx, radiusPx, 0f, 0f, 0f, 0f),
+                Path.Direction.CW,
+            )
+            canvas.drawPath(path, backgroundPaint)
+            var y = rect.top + dotGap
+            while (y < rect.bottom) {
+                var x = rect.left + dotGap
+                while (x < rect.right) {
+                    canvas.drawCircle(x, y, dotRadius, dotPaint)
+                    x += dotGap
+                }
+                y += dotGap
+            }
+        }
+
+        override fun setAlpha(alpha: Int) {
+            backgroundPaint.alpha = alpha
+            dotPaint.alpha = alpha
+        }
+
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+            backgroundPaint.colorFilter = colorFilter
+            dotPaint.colorFilter = colorFilter
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
     companion object {
         private const val REQUEST_POST_NOTIFICATIONS = 42
         private const val DOWNLOAD_PROGRESS_REFRESH_MILLIS = 1_000L
+        private const val PRESS_DURATION_MS = 90L
+        private const val RELEASE_DURATION_MS = 140L
+        private const val STATE_CHANGE_DURATION_MS = 160L
+        private const val CONTENT_ENTER_DURATION_MS = 210L
+        private const val PULSE_DURATION_MS = 120L
+        private const val RUNNING_PULSE_DURATION_MS = 1_200L
+        private const val WORD_STAGGER_MS = 45L
         private const val CARD_ELEVATION_DP = 2
+        private const val AI_CARD_ELEVATION_DP = 1
+        private const val AI_HERO_ELEVATION_DP = 4
         private const val NAV_ELEVATION_DP = 8
 
         private const val SANS_FAMILY = "sans-serif"
@@ -2003,6 +2926,7 @@ class MainActivity : Activity() {
         private val APP_MUTED_SURFACE = Color.parseColor("#F1F4F1")
         private val APP_SURFACE_CONTAINER_HIGH = Color.parseColor("#E5E9E6")
         private val PREVIEW_BACKGROUND = Color.parseColor("#2D3130")
+        private val APP_PREVIEW_DEEP = Color.parseColor("#141918")
         private val APP_TEXT_PRIMARY = Color.parseColor("#181C1B")
         private val APP_TEXT_SECONDARY = Color.parseColor("#3E4945")
         private val APP_INVERSE_TEXT = Color.parseColor("#EEF2EE")
@@ -2010,6 +2934,10 @@ class MainActivity : Activity() {
         private val APP_BORDER = Color.parseColor("#6E7975")
         private val APP_PRIMARY = Color.parseColor("#005344")
         private val APP_PRIMARY_CONTAINER = Color.parseColor("#006D5B")
+        private val APP_LEARN_HERO_DEEP = Color.parseColor("#012A24")
+        private val APP_AI_HERO_DEEP = Color.parseColor("#00382F")
+        private val APP_AI_HERO_TEXT = Color.parseColor("#D8F4EA")
+        private val APP_AI_SUBTLE_STROKE = Color.parseColor("#D7E2DD")
         private val APP_ON_PRIMARY = Color.parseColor("#FFFFFF")
         private val APP_SECONDARY_CONTAINER = Color.parseColor("#CFE3EE")
         private val APP_SECONDARY_TEXT = Color.parseColor("#374953")
@@ -2018,6 +2946,10 @@ class MainActivity : Activity() {
         private val APP_ERROR = Color.parseColor("#BA1A1A")
         private val APP_ERROR_CONTAINER = Color.parseColor("#FFDAD6")
         private val APP_ON_ERROR_CONTAINER = Color.parseColor("#93000A")
+        private val AI_FAILURE_HEADER = Color.parseColor("#FFD2D0")
+        private val AI_FAILURE_DOT = Color.parseColor("#EFB3B0")
+        private val AI_WARNING_SURFACE = Color.parseColor("#FFF4F1")
+        private val APP_DISABLED_PRIMARY = Color.parseColor("#84BDB2")
         private val APP_SUCCESS = Color.parseColor("#0E9F6E")
         private val APP_SUCCESS_SURFACE = Color.parseColor("#E2F7EF")
         private val APP_SHADOW = Color.parseColor("#24006B59")

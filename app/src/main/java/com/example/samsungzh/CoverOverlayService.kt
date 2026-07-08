@@ -1,5 +1,7 @@
 package com.example.samsungzh
 
+import android.animation.ValueAnimator
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -21,9 +23,12 @@ import android.provider.Settings
 import android.text.Layout
 import android.view.Display
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
 import android.widget.LinearLayout
 import android.widget.TextView
 
@@ -35,6 +40,7 @@ class CoverOverlayService : Service() {
     private var overlayView: View? = null
     private var overlayWindowManager: WindowManager? = null
     private var displayLabel: String = "not attached"
+    private var lastRenderedPhrase: OverlayPhrase? = null
     private var screenReceiverRegistered = false
 
     private val displayListener = object : DisplayManager.DisplayListener {
@@ -122,6 +128,7 @@ class CoverOverlayService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
         showOverlay()
         refreshOverlayAndNotification()
+        scheduleAutoHideIfNeeded()
         handler.removeCallbacks(refreshRunnable)
         scheduleNextRefresh()
         return START_STICKY
@@ -189,6 +196,7 @@ class CoverOverlayService : Service() {
             displayLabel = "display ${display.displayId}: ${display.name}"
             overlayPreferences.overlayStatus =
                 "Overlay status: attached to $displayLabel. Main display fallback disabled."
+            animateOverlayIn(view)
             scheduleAutoHideIfNeeded()
             true
         } catch (_: RuntimeException) {
@@ -203,9 +211,13 @@ class CoverOverlayService : Service() {
             setBackgroundColor(Color.TRANSPARENT)
             setPadding(dp(context, 4), dp(context, 4), dp(context, 4), dp(context, 4))
             isClickable = true
+            attachOverlayPressFeedback(this)
             setOnClickListener {
-                repository.advanceWord()
-                refreshOverlayAndNotification()
+                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                animateOverlayTap(this) {
+                    repository.advanceWord()
+                    refreshOverlayAndNotification()
+                }
             }
         }
 
@@ -248,6 +260,7 @@ class CoverOverlayService : Service() {
         return root
     }
 
+    @SuppressLint("WrongConstant")
     private fun overlayTextView(
         context: Context,
         id: Int,
@@ -290,9 +303,14 @@ class CoverOverlayService : Service() {
     }
 
     private fun renderOverlayPhrase(phrase: OverlayPhrase) {
+        val phraseChanged = lastRenderedPhrase != null && lastRenderedPhrase != phrase
         overlayView?.findViewById<TextView>(R.id.overlay_hanzi)?.text = phrase.hanzi
         overlayView?.findViewById<TextView>(R.id.overlay_pinyin)?.text = phrase.pinyinDisplay
         overlayView?.findViewById<TextView>(R.id.overlay_english)?.text = phrase.english
+        if (phraseChanged) {
+            overlayView?.let { animateOverlayIn(it) }
+        }
+        lastRenderedPhrase = phrase
     }
 
     private fun scheduleNextRefresh() {
@@ -330,20 +348,125 @@ class CoverOverlayService : Service() {
         }
         overlayView = null
         overlayWindowManager = null
+        lastRenderedPhrase = null
         displayLabel = "not attached"
     }
 
     private fun hideOverlayForAutoHide() {
         val hadOverlay = overlayView != null
         val hideSeconds = overlayPreferences.autoHideSeconds
-        stopOverlay()
         if (!hadOverlay) return
 
-        displayLabel = "auto-hidden"
-        overlayPreferences.overlayStatus =
-            "Overlay status: auto-hidden after ${hideSeconds}s. Notification fallback active."
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
+        stopOverlayAnimated {
+            displayLabel = "auto-hidden"
+            overlayPreferences.overlayStatus =
+                "Overlay status: auto-hidden after ${hideSeconds}s. Notification fallback active."
+            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
+        }
     }
+
+    private fun stopOverlayAnimated(onComplete: () -> Unit) {
+        val view = overlayView
+        if (view == null || !animationsEnabled()) {
+            stopOverlay()
+            onComplete()
+            return
+        }
+
+        view.animate().cancel()
+        view.animate()
+            .alpha(0f)
+            .translationY(-dp(view.context, 4).toFloat())
+            .setDuration(OVERLAY_EXIT_DURATION_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction {
+                stopOverlay()
+                onComplete()
+            }
+            .start()
+    }
+
+    private fun animateOverlayIn(view: View) {
+        view.animate().cancel()
+        if (!animationsEnabled()) {
+            view.alpha = 1f
+            view.translationY = 0f
+            view.scaleX = 1f
+            view.scaleY = 1f
+            return
+        }
+
+        view.alpha = 0f
+        view.translationY = dp(view.context, 6).toFloat()
+        view.scaleX = 0.985f
+        view.scaleY = 0.985f
+        view.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(OVERLAY_ENTER_DURATION_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    private fun animateOverlayTap(view: View, onComplete: () -> Unit) {
+        if (!animationsEnabled()) {
+            onComplete()
+            return
+        }
+
+        view.animate().cancel()
+        view.animate()
+            .scaleX(0.965f)
+            .scaleY(0.965f)
+            .alpha(0.86f)
+            .setDuration(OVERLAY_TAP_DURATION_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction {
+                view.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .alpha(1f)
+                    .setDuration(OVERLAY_RELEASE_DURATION_MS)
+                    .setInterpolator(DecelerateInterpolator())
+                    .withEndAction { onComplete() }
+                    .start()
+            }
+            .start()
+    }
+
+    private fun attachOverlayPressFeedback(view: View) {
+        view.setOnTouchListener { touchedView, event ->
+            if (!animationsEnabled()) return@setOnTouchListener false
+
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    touchedView.animate()
+                        .scaleX(0.975f)
+                        .scaleY(0.975f)
+                        .alpha(0.9f)
+                        .setDuration(OVERLAY_TAP_DURATION_MS)
+                        .setInterpolator(DecelerateInterpolator())
+                        .start()
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    touchedView.animate()
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .alpha(1f)
+                        .setDuration(OVERLAY_RELEASE_DURATION_MS)
+                        .setInterpolator(DecelerateInterpolator())
+                        .start()
+                }
+            }
+            false
+        }
+    }
+
+    private fun animationsEnabled(): Boolean =
+        ValueAnimator.areAnimatorsEnabled()
 
     private fun scheduleAutoHideIfNeeded() {
         handler.removeCallbacks(autoHideRunnable)
@@ -451,6 +574,10 @@ class CoverOverlayService : Service() {
         private const val COVER_DISPLAY_ID = 1
         private const val MIN_REFRESH_DELAY_MILLIS = 1_000L
         private const val REFRESH_GRACE_MILLIS = 250L
+        private const val OVERLAY_ENTER_DURATION_MS = 180L
+        private const val OVERLAY_EXIT_DURATION_MS = 140L
+        private const val OVERLAY_TAP_DURATION_MS = 80L
+        private const val OVERLAY_RELEASE_DURATION_MS = 110L
         private const val SERIF_FAMILY = "Noto Serif TC"
         private const val SANS_FAMILY = "sans-serif"
 

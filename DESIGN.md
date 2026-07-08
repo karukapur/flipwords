@@ -169,7 +169,7 @@ The shape language is characterized by "Super-ellipses" and heavy rounding to ev
 - **Primary Button:** Large, pill-shaped, #006D5B background with White text. Minimum height: 56px for easy thumb tapping.
 - **Learning Cards:** Oversized containers with 32px rounding. Content should be centered vertically and horizontally. 
 - **Segmented Controls:** Used for switching between "Traditional," "Simplified," and "Pinyin" views. Uses a tonal background (#EEF2F1) with a white pill indicator for the active state.
-- **Bottom Navigation:** Material 3 style with an active indicator (pill shape around the icon). No labels for a cleaner look, or small `label-sm` text.
+- **Bottom Navigation:** Fixed Material 3 style bar with icon-only tabs, Heroicons outline symbols, and an active indicator around the selected icon.
 - **Progress Sliders:** Thick, 8px tracks with a large, circular #FFB300 thumb to indicate lesson progress.
 - **Status Chips:** Small, 12px font, 16px vertical padding, used for "New," "Review," or "Mastered" tags.
 - **Translation Bottom Sheet:** Used for quick-lookups; should slide up from the bottom with a prominent drag handle and 32px top corner rounding.
