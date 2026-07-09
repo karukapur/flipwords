@@ -132,6 +132,44 @@ class SchedulerLogicTest {
     }
 
     @Test
+    fun customMinimumSpacingControlsRotationEligibility() {
+        val customSpacing = 60L * SchedulerConfig.MILLIS_PER_MINUTE
+        val currentProgress = WordProgress(
+            wordId = words[0].stableId(),
+            timesDisplayed = 1,
+            lastSeenAt = now,
+        )
+        val refreshed = EffectiveExposureCalculator.update(
+            currentProgress,
+            now,
+            customSpacing,
+        )
+
+        assertEquals(now + customSpacing, refreshed.nextEligibleAt)
+
+        val tooSoon = WordSelectionScheduler.selectWord(
+            words = words,
+            progressById = mapOf(words[0].stableId() to currentProgress),
+            currentWordId = words[0].stableId(),
+            nowMillis = now + 30L * SchedulerConfig.MILLIS_PER_MINUTE,
+            phoneLearningState = PhoneLearningState.ACTIVE_PHONE_USE,
+            minimumSpacingMillis = customSpacing,
+        )
+        val due = WordSelectionScheduler.selectWord(
+            words = words,
+            progressById = mapOf(words[0].stableId() to currentProgress),
+            currentWordId = words[0].stableId(),
+            nowMillis = now + customSpacing,
+            phoneLearningState = PhoneLearningState.ACTIVE_PHONE_USE,
+            minimumSpacingMillis = customSpacing,
+        )
+
+        assertFalse(tooSoon.rotated)
+        assertEquals(words[0], tooSoon.word)
+        assertTrue(due.rotated)
+    }
+
+    @Test
     fun masteredWordsNeedMaintenanceWindow() {
         val mastered = WordProgress(
             wordId = words[1].stableId(),

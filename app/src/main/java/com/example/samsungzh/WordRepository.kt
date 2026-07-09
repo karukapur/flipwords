@@ -10,6 +10,7 @@ class WordRepository(context: Context) {
     private val phoneStateDetector = PhoneStateDetector(appContext)
     private val aiLabPreferences = AiLabPreferences(appContext)
     private val generatedVocabularyStore = GeneratedVocabularyStore(appContext)
+    private val schedulerPreferences = SchedulerPreferences(appContext)
 
     fun currentWord(nowMillis: Long = System.currentTimeMillis()): WordEntry =
         schedulerTick(nowMillis).word
@@ -38,10 +39,19 @@ class WordRepository(context: Context) {
         val progress = markDisplayed(
             progress = progressById[wordId] ?: WordProgress(wordId),
             nowMillis = nowMillis,
+            minimumSpacingMillis = schedulerPreferences.minimumSpacingMillis,
         )
         progressById[wordId] = progress
         progressStore.saveProgress(progressById)
-        progressStore.setCurrent(wordId, WordSelectionScheduler.displayModeFor(progress, word, nowMillis))
+        progressStore.setCurrent(
+            wordId,
+            WordSelectionScheduler.displayModeFor(
+                progress,
+                word,
+                nowMillis,
+                schedulerPreferences.minimumSpacingMillis,
+            ),
+        )
         startNewSession(wordId, progressStore.currentDisplayMode(), nowMillis)
     }
 
@@ -57,8 +67,9 @@ class WordRepository(context: Context) {
     fun adaptiveRotationInfo(nowMillis: Long = System.currentTimeMillis()): AdaptiveRotationInfo {
         val state = phoneStateDetector.currentState(nowMillis)
         val decision = schedulerTick(nowMillis, state)
+        val minimumSpacingMillis = schedulerPreferences.minimumSpacingMillis
         val nextOpportunity = decision.progress.nextEligibleAt
-            ?: (nowMillis + SchedulerConfig.DEFAULT_MINIMUM_SPACING_MILLIS)
+            ?: (nowMillis + minimumSpacingMillis)
         return AdaptiveRotationInfo(
             currentWord = decision.word,
             displayMode = decision.displayMode,
@@ -67,7 +78,7 @@ class WordRepository(context: Context) {
             } else {
                 nextOpportunity
             },
-            minimumSpacingMillis = SchedulerConfig.DEFAULT_MINIMUM_SPACING_MILLIS,
+            minimumSpacingMillis = minimumSpacingMillis,
             phoneLearningState = state,
             progress = decision.progress,
         )
@@ -84,7 +95,7 @@ class WordRepository(context: Context) {
 
     fun progressById(nowMillis: Long = System.currentTimeMillis()): Map<String, WordProgress> =
         progressStore.loadProgress().mapValues { (_, progress) ->
-            EffectiveExposureCalculator.update(progress, nowMillis)
+            EffectiveExposureCalculator.update(progress, nowMillis, schedulerPreferences.minimumSpacingMillis)
         }
 
     fun compactSessions(): List<DisplaySession> = sessionLogger.compactSessions()
@@ -155,8 +166,9 @@ class WordRepository(context: Context) {
         forceRotate: Boolean = false,
     ): SchedulerDecision {
         val words = activeWords()
+        val minimumSpacingMillis = schedulerPreferences.minimumSpacingMillis
         var progressById = progressStore.loadProgress().toMutableMap()
-        accountActiveSession(nowMillis, phoneLearningState, progressById, endSession = false)
+        accountActiveSession(nowMillis, phoneLearningState, progressById, endSession = false, minimumSpacingMillis)
 
         val decision = WordSelectionScheduler.selectWord(
             words = words,
@@ -165,6 +177,7 @@ class WordRepository(context: Context) {
             nowMillis = nowMillis,
             phoneLearningState = phoneLearningState,
             forceRotate = forceRotate,
+            minimumSpacingMillis = minimumSpacingMillis,
         )
 
         if (decision.paused) {
@@ -175,10 +188,11 @@ class WordRepository(context: Context) {
         val currentId = progressStore.currentWordId()
         if (decision.rotated || currentId == null || sessionLogger.activeSession() == null) {
             progressById = progressStore.loadProgress().toMutableMap()
-            accountActiveSession(nowMillis, phoneLearningState, progressById, endSession = true)
+            accountActiveSession(nowMillis, phoneLearningState, progressById, endSession = true, minimumSpacingMillis)
             val displayed = markDisplayed(
                 progress = progressById[decision.word.stableId()] ?: WordProgress(decision.word.stableId()),
                 nowMillis = nowMillis,
+                minimumSpacingMillis = minimumSpacingMillis,
             )
             progressById[decision.word.stableId()] = displayed
             progressStore.saveProgress(progressById)
@@ -196,6 +210,7 @@ class WordRepository(context: Context) {
         state: PhoneLearningState,
         progressById: MutableMap<String, WordProgress>,
         endSession: Boolean,
+        minimumSpacingMillis: Long,
     ) {
         val active = sessionLogger.activeSession() ?: return
         val accounted = active.accountUntil(nowMillis, state)
@@ -214,13 +229,18 @@ class WordRepository(context: Context) {
                     tapsWhileActive = existing.tapsWhileActive + finished.tapCount,
                 ),
                 nowMillis,
+                minimumSpacingMillis,
             )
         } else {
             sessionLogger.saveActiveSession(accounted)
         }
     }
 
-    private fun markDisplayed(progress: WordProgress, nowMillis: Long): WordProgress {
+    private fun markDisplayed(
+        progress: WordProgress,
+        nowMillis: Long,
+        minimumSpacingMillis: Long,
+    ): WordProgress {
         val previousLastSeen = progress.lastSeenAt
         val distinctDays = if (previousLastSeen == null || epochDay(previousLastSeen) != epochDay(nowMillis)) {
             progress.distinctDaysSeen + 1
@@ -229,7 +249,7 @@ class WordRepository(context: Context) {
         }
         val spacedReappearances = if (
             previousLastSeen != null &&
-            nowMillis - previousLastSeen >= SchedulerConfig.DEFAULT_MINIMUM_SPACING_MILLIS
+            nowMillis - previousLastSeen >= minimumSpacingMillis
         ) {
             progress.spacedReappearances + 1
         } else {
@@ -242,9 +262,10 @@ class WordRepository(context: Context) {
                 lastSeenAt = nowMillis,
                 distinctDaysSeen = distinctDays,
                 spacedReappearances = spacedReappearances,
-                nextEligibleAt = nowMillis + SchedulerConfig.DEFAULT_MINIMUM_SPACING_MILLIS,
+                nextEligibleAt = nowMillis + minimumSpacingMillis,
             ),
             nowMillis,
+            minimumSpacingMillis,
         )
     }
 

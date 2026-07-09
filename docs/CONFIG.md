@@ -4,7 +4,7 @@ All scheduler defaults live in `SchedulerConfig.kt` and `SchedulerFeatureFlags.k
 
 | Constant | Default | Meaning |
 | --- | ---: | --- |
-| `DEFAULT_MINIMUM_SPACING_MINUTES` | 90 | Minimum target before word can change |
+| `DEFAULT_MINIMUM_SPACING_MINUTES` | 90 | Default minimum target before word can change; user-adjustable in the Schedule tab |
 | `BASE_HALF_LIFE_HOURS` | 2.0 | Starting estimated half-life |
 | `HALF_LIFE_GROWTH_FACTOR` | 1.45 | Half-life growth per effective exposure |
 | `MAX_HALF_LIFE_HOURS` | 720 | Cap at 30 days |

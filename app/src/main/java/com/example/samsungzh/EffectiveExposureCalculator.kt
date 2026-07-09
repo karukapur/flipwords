@@ -35,7 +35,11 @@ object EffectiveExposureCalculator {
             (2.5 * tapsWhileActive.coerceAtLeast(0))
     }
 
-    fun update(progress: WordProgress, nowMillis: Long): WordProgress {
+    fun update(
+        progress: WordProgress,
+        nowMillis: Long,
+        minimumSpacingMillis: Long = SchedulerConfig.DEFAULT_MINIMUM_SPACING_MILLIS,
+    ): WordProgress {
         val effective = effectiveExposures(
             validDisplaySessions = progress.timesDisplayed,
             eligibleExposureMillis = progress.totalEligibleExposureMillis,
@@ -67,7 +71,7 @@ object EffectiveExposureCalculator {
             estimatedHalfLifeHours = halfLife,
             predictedRecall = predicted,
             familiarityScore = familiarity,
-            nextEligibleAt = progress.lastSeenAt?.plus(SchedulerConfig.DEFAULT_MINIMUM_SPACING_MILLIS),
+            nextEligibleAt = progress.lastSeenAt?.plus(minimumSpacingMillis),
             status = status,
             isHidden = status == WordStatus.HIDDEN,
         )

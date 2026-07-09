@@ -12,10 +12,12 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -59,6 +61,7 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var repository: WordRepository
     private lateinit var overlayPreferences: OverlayPreferences
+    private lateinit var schedulerPreferences: SchedulerPreferences
     private lateinit var aiLabPreferences: AiLabPreferences
     private lateinit var aiModelManager: AiModelManager
     private lateinit var hanziView: TextView
@@ -75,6 +78,7 @@ class MainActivity : Activity() {
     private lateinit var bucketMetricView: TextView
     private lateinit var frequencyMetricView: TextView
     private lateinit var intervalStatusView: TextView
+    private lateinit var schedulerSpacingButton: TextView
     private lateinit var intervalChangeButton: TextView
     private lateinit var hskFilterButton: TextView
     private lateinit var statsSeenView: TextView
@@ -115,6 +119,7 @@ class MainActivity : Activity() {
     private lateinit var aiPackPillView: TextView
     private lateinit var learnSection: LinearLayout
     private lateinit var styleSection: LinearLayout
+    private lateinit var schedulerSection: LinearLayout
     private lateinit var aiLabSection: LinearLayout
     private lateinit var deviceSection: LinearLayout
     private lateinit var mainScrollView: ScrollView
@@ -140,6 +145,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         repository = WordRepository(this)
         overlayPreferences = OverlayPreferences(this)
+        schedulerPreferences = SchedulerPreferences(this)
         aiLabPreferences = AiLabPreferences(this)
         aiModelManager = AiModelManager(this)
         repository.recordFullAppOpen()
@@ -200,7 +206,9 @@ class MainActivity : Activity() {
         styleSection = sectionContainer().apply {
             addView(buildPreviewCard(), textLayoutParams())
             addView(buildStyleCard(), textLayoutParams(topMargin = 16))
-            addView(buildAdaptiveSchedulerCard(), textLayoutParams(topMargin = 16))
+        }
+        schedulerSection = sectionContainer().apply {
+            addView(buildAdaptiveSchedulerCard(), textLayoutParams())
         }
         aiLabSection = sectionContainer().apply {
             addView(buildAiLabHeroCard(), textLayoutParams())
@@ -216,6 +224,7 @@ class MainActivity : Activity() {
         contentRoot.addView(buildTopAppBar(), textLayoutParams())
         contentRoot.addView(learnSection, textLayoutParams(topMargin = 18))
         contentRoot.addView(styleSection, textLayoutParams(topMargin = 18))
+        contentRoot.addView(schedulerSection, textLayoutParams(topMargin = 18))
         contentRoot.addView(aiLabSection, textLayoutParams(topMargin = 18))
         contentRoot.addView(deviceSection, textLayoutParams(topMargin = 18))
         contentShell.addView(
@@ -393,7 +402,12 @@ class MainActivity : Activity() {
     private fun buildPreviewCard(): LinearLayout {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = roundedGradientBackground(PREVIEW_BACKGROUND, APP_PREVIEW_DEEP, radius = 28)
+            background = ShimmerCardDrawable(
+                startColor = PREVIEW_BACKGROUND,
+                endColor = APP_PREVIEW_DEEP,
+                shimmerColor = PREVIEW_SHIMMER,
+                radiusPx = dp(28).toFloat(),
+            )
             applySoftElevation(this, CARD_ELEVATION_DP)
             setPadding(dp(22), dp(22), dp(22), dp(24))
         }
@@ -477,15 +491,27 @@ class MainActivity : Activity() {
     }
 
     private fun buildStatsCard(): LinearLayout {
-        val card = appCard()
+        val card = appCard().apply {
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+        }
         card.addView(appSectionHeader("Vocabulary Progress", "Estimated progress", R.drawable.ic_learn))
         hskFilterButton = actionButton("All", primary = false, iconRes = R.drawable.ic_level).apply {
+            minHeight = dp(42)
+            textSize = 13f
+            setPadding(dp(14), 0, dp(14), 0)
+            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 21, strokeColor = APP_AI_SUBTLE_STROKE)
+            setTextColor(APP_PRIMARY)
             setOnClickListener {
                 performSelectionHaptic()
                 showLearnHskFilterDialog()
             }
         }
-        card.addView(hskFilterButton, textLayoutParams(topMargin = 14))
+        card.addView(
+            hskFilterButton,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)).apply {
+                topMargin = dp(12)
+            },
+        )
 
         val grid = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -506,17 +532,19 @@ class MainActivity : Activity() {
         card.addView(grid)
 
         progressChartView = VocabularyProgressChartView(this).apply {
-            minimumHeight = dp(190)
+            minimumHeight = dp(118)
+            setPadding(0, dp(2), 0, 0)
         }
-        card.addView(progressChartView, textLayoutParams(topMargin = 18))
+        card.addView(progressChartView, textLayoutParams(topMargin = 12))
 
-        recentProgressView = infoTextView()
-        card.addView(statusPanel(recentProgressView, R.drawable.ic_check), textLayoutParams(topMargin = 14))
+        recentProgressView = infoTextView().apply { textSize = 13f }
+        card.addView(compactStatusPanel(recentProgressView, R.drawable.ic_check), textLayoutParams(topMargin = 10))
 
         val definitions = infoTextView().apply {
+            textSize = 13f
             text = "New: barely seen. Learning: being reinforced. Familiar: seen across sessions. Stable: appears less often. Mastered: occasional maintenance."
         }
-        card.addView(statusPanel(definitions, R.drawable.ic_status_dot), textLayoutParams(topMargin = 10))
+        card.addView(compactStatusPanel(definitions, R.drawable.ic_status_dot), textLayoutParams(topMargin = 8))
         return card
     }
 
@@ -832,8 +860,8 @@ class MainActivity : Activity() {
         aiScheduleStatusView.visibility = View.GONE
         root.addView(aiScheduleStatusView)
         aiDeleteModelButton = actionButton("Delete model", primary = false, iconRes = R.drawable.ic_delete).apply {
-            background = roundedBackground(Color.TRANSPARENT, radius = 24)
-            setTextColor(APP_ERROR)
+            background = roundedBackground(APP_ERROR, radius = 28)
+            setTextColor(APP_ON_PRIMARY)
             setOnClickListener {
                 performActionHaptic()
                 showDeleteModelConfirmation()
@@ -972,10 +1000,10 @@ class MainActivity : Activity() {
             backgroundColor = background,
         )
         overlayStatusView.text = when {
-            overlayEnabled -> "Overlay running on cover display when available."
             hasOverlayPermission -> "Overlay ready. Tap Start to show it on the cover display."
             else -> "Overlay permission needed before starting."
         }
+        setVisibleAnimated(overlayStatusView, !overlayEnabled, slide = true)
         setVisibleAnimated(overlayPermissionContainer, !hasOverlayPermission, slide = true)
     }
 
@@ -1148,8 +1176,8 @@ class MainActivity : Activity() {
             text = "Delete model from phone",
             primary = false,
             iconRes = R.drawable.ic_delete,
-            backgroundColor = Color.TRANSPARENT,
-            textColor = APP_ERROR,
+            backgroundColor = APP_ERROR,
+            textColor = APP_ON_PRIMARY,
         )
         setVisibleAnimated(aiDeleteModelButton, modelReady, slide = true)
         setSubtlePulse(aiModelPillView, downloadProgress.isDownloading)
@@ -1311,11 +1339,17 @@ class MainActivity : Activity() {
     private fun addAdaptiveSchedulerInfo(root: LinearLayout) {
         intervalStatusView = infoTextView()
         root.addView(statusPanel(intervalStatusView, R.drawable.ic_clock), textLayoutParams(topMargin = 16))
+        schedulerSpacingButton = actionButton("Minimum spacing", primary = false, iconRes = R.drawable.ic_clock).apply {
+            setOnClickListener {
+                performSelectionHaptic()
+                showMinimumSpacingDialog()
+            }
+        }
+        root.addView(schedulerSpacingButton, textLayoutParams(topMargin = 10))
         intervalChangeButton = actionButton("Restore hidden words", primary = false, iconRes = R.drawable.ic_repeat).apply {
             setOnClickListener {
                 performSelectionHaptic()
-                repository.restoreHiddenWords()
-                render()
+                showRestoreHiddenWordsConfirmation()
             }
         }
         root.addView(intervalChangeButton, textLayoutParams(topMargin = 10))
@@ -1338,46 +1372,167 @@ class MainActivity : Activity() {
 
     private fun showWordOptionsDialog() {
         val word = repository.currentWord()
-        val options = arrayOf("Don't show this word", "Reset progress")
-        AlertDialog.Builder(this)
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        val hideButton = actionButton("Hide word", primary = false, iconRes = R.drawable.ic_stop).apply {
+            configureActionButton(
+                button = this,
+                text = "Hide word",
+                primary = false,
+                iconRes = R.drawable.ic_stop,
+                backgroundColor = APP_ERROR_CONTAINER,
+                textColor = APP_ON_ERROR_CONTAINER,
+            )
+        }
+        val resetButton = actionButton("Reset progress", primary = false, iconRes = R.drawable.ic_repeat)
+        actions.addView(hideButton, textLayoutParams())
+        actions.addView(resetButton, textLayoutParams(topMargin = 10))
+
+        lateinit var dialog: AlertDialog
+        dialog = AlertDialog.Builder(this)
             .setTitle("Advanced word options")
             .setMessage("${word.hanzi} [${PinyinToneFormatter.format(word)}]\n${word.english}")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> showHideWordConfirmation(word)
-                    1 -> showResetProgressConfirmation(word)
-                }
-            }
+            .setView(actions)
             .setNegativeButton("Cancel", null)
             .show()
+
+        hideButton.setOnClickListener {
+            performSelectionHaptic()
+            dialog.dismiss()
+            showHideWordConfirmation(word)
+        }
+        resetButton.setOnClickListener {
+            performSelectionHaptic()
+            dialog.dismiss()
+            showResetProgressConfirmation(word)
+        }
     }
 
     private fun showHideWordConfirmation(word: WordEntry) {
+        showConfirmationDialog(
+            title = "Hide word?",
+            message = "This hides ${word.hanzi} from normal scheduling until hidden words are restored.",
+            positiveText = "Hide word",
+            destructive = true,
+        ) {
+            performConfirmHaptic()
+            repository.hideCurrentWord()
+            refreshOverlay()
+            render()
+        }
+    }
+
+    private fun showResetProgressConfirmation(word: WordEntry) {
+        showConfirmationDialog(
+            title = "Reset progress?",
+            message = "This clears estimated progress for ${word.hanzi}. The scheduler will treat it like a new word again.",
+            positiveText = "Reset progress",
+            destructive = true,
+        ) {
+            performConfirmHaptic()
+            repository.resetCurrentWordProgress()
+            render()
+        }
+    }
+
+    private fun showRestoreHiddenWordsConfirmation() {
+        showConfirmationDialog(
+            title = "Restore hidden words?",
+            message = "Hidden words will return to normal scheduling and may appear again in future learning sessions.",
+            positiveText = "Restore",
+            destructive = false,
+        ) {
+            performConfirmHaptic()
+            repository.restoreHiddenWords()
+            Toast.makeText(this, "Hidden words restored.", Toast.LENGTH_SHORT).show()
+            render()
+        }
+    }
+
+    private fun showMinimumSpacingDialog() {
+        val presets = listOf(
+            IntervalPreset("15m", 15),
+            IntervalPreset("30m", 30),
+            IntervalPreset("60m", 60),
+            IntervalPreset("90m", 90),
+            IntervalPreset("120m", 120),
+            IntervalPreset("240m", 240),
+        )
+        val labels = presets.map { it.label }.toMutableList().apply {
+            add("Custom...")
+        }
+        val current = schedulerPreferences.minimumSpacingMinutes.toInt()
+        val selected = presets.indexOfFirst { it.seconds == current }
+
         AlertDialog.Builder(this)
-            .setTitle("Don't show this word?")
-            .setMessage("This hides ${word.hanzi} from normal scheduling until hidden words are restored.")
-            .setNegativeButton("No", null)
-            .setPositiveButton("Yes") { _, _ ->
-                performConfirmHaptic()
-                repository.hideCurrentWord()
-                refreshOverlay()
-                render()
+            .setTitle("Minimum word spacing")
+            .setSingleChoiceItems(labels.toTypedArray(), selected) { dialog, which ->
+                dialog.dismiss()
+                performSelectionHaptic()
+                if (which < presets.size) {
+                    setMinimumSpacingMinutes(presets[which].seconds.toLong())
+                } else {
+                    showCustomMinimumSpacingDialog()
+                }
             }
             .show()
     }
 
-    private fun showResetProgressConfirmation(word: WordEntry) {
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Reset progress?")
-            .setMessage("This clears estimated progress for ${word.hanzi}. The scheduler will treat it like a new word again.")
-            .setNegativeButton("No", null)
-            .setPositiveButton("Yes, reset") { _, _ ->
-                performConfirmHaptic()
-                repository.resetCurrentWordProgress()
-                render()
+    private fun showCustomMinimumSpacingDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(schedulerPreferences.minimumSpacingMinutes.toString())
+            selectAll()
+            setPadding(dp(12), 0, dp(12), 0)
+            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 16, strokeColor = APP_OUTLINE_VARIANT)
+            minHeight = dp(52)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Custom spacing")
+            .setMessage(
+                "Choose ${SchedulerPreferences.MIN_MINIMUM_SPACING_MINUTES}-${SchedulerPreferences.MAX_MINIMUM_SPACING_MINUTES} minutes.",
+            )
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Done") { _, _ ->
+                val value = input.text.toString().toLongOrNull() ?: return@setPositiveButton
+                performSelectionHaptic()
+                setMinimumSpacingMinutes(value)
             }
             .show()
-        dialog.getButton(Dialog.BUTTON_POSITIVE)?.setTextColor(APP_ERROR)
+    }
+
+    private fun setMinimumSpacingMinutes(minutes: Long) {
+        val normalized = SchedulerPreferences.normalizeMinutes(minutes)
+        schedulerPreferences.minimumSpacingMinutes = normalized
+        if (normalized != minutes) {
+            Toast.makeText(
+                this,
+                "Spacing adjusted to ${formatInterval(normalized * 60L)}.",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+        refreshOverlay()
+        render()
+    }
+
+    private fun showConfirmationDialog(
+        title: String,
+        message: String,
+        positiveText: String,
+        destructive: Boolean,
+        onConfirm: () -> Unit,
+    ) {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton(positiveText) { _, _ -> onConfirm() }
+            .show()
+        dialog.getButton(Dialog.BUTTON_POSITIVE)?.setTextColor(if (destructive) APP_ERROR else APP_PRIMARY)
     }
 
     private fun showGenerationTimePicker() {
@@ -1498,12 +1653,20 @@ class MainActivity : Activity() {
                 formatInterval(info.minimumSpacingMillis / 1000L)
             }.\nCurrent context: ${info.phoneLearningState.readableLabel()}."
         if (::intervalChangeButton.isInitialized) {
+            val hasHiddenWords = repository.progressById().values.any { it.status == WordStatus.HIDDEN || it.isHidden }
+            configureActionButton(
+                button = schedulerSpacingButton,
+                text = "Minimum spacing: ${formatInterval(schedulerPreferences.minimumSpacingMinutes * 60L)}",
+                primary = false,
+                iconRes = R.drawable.ic_clock,
+            )
             configureActionButton(
                 button = intervalChangeButton,
                 text = "Restore hidden words",
                 primary = false,
                 iconRes = R.drawable.ic_repeat,
             )
+            setEnabledAnimated(intervalChangeButton, hasHiddenWords)
         }
     }
 
@@ -1537,16 +1700,43 @@ class MainActivity : Activity() {
         row.addView(autoHideSwitch)
         root.addView(row, textLayoutParams(topMargin = 14))
 
-        autoHideStatusView = infoTextView()
-        root.addView(statusPanel(autoHideStatusView, R.drawable.ic_repeat), textLayoutParams(topMargin = 10))
-
-        autoHideDurationButton = actionButton("Visible duration", primary = false, iconRes = R.drawable.ic_clock).apply {
-            setOnClickListener {
-                performSelectionHaptic()
-                showAutoHideOptionsDialog()
+        val statusRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundedBackground(APP_MUTED_SURFACE, radius = 20)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            addView(
+                iconBadge(
+                    iconRes = R.drawable.ic_repeat,
+                    iconTint = APP_SECONDARY_TEXT,
+                    backgroundColor = APP_SURFACE,
+                    sizeDp = 34,
+                ),
+                LinearLayout.LayoutParams(dp(34), dp(34)),
+            )
+            autoHideStatusView = infoTextView().apply {
+                textSize = 13f
+                setPadding(dp(12), 0, dp(10), 0)
             }
+            addView(autoHideStatusView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            autoHideDurationButton = TextView(this@MainActivity).apply {
+                gravity = Gravity.CENTER
+                isClickable = true
+                isFocusable = true
+                textSize = 12f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                includeFontPadding = false
+                minHeight = dp(38)
+                setPadding(dp(12), 0, dp(12), 0)
+                attachPressFeedback(this)
+                setOnClickListener {
+                    performSelectionHaptic()
+                    showAutoHideOptionsDialog()
+                }
+            }
+            addView(autoHideDurationButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)))
         }
-        root.addView(autoHideDurationButton, textLayoutParams(topMargin = 10))
+        root.addView(statusRow, textLayoutParams(topMargin = 10))
         updateAutoHideControls()
     }
 
@@ -1563,18 +1753,21 @@ class MainActivity : Activity() {
         }
         updatingUi = false
 
-        configureInfoLine(
-            view = autoHideStatusView,
-            text = if (enabled) "Floating text hides after $duration; the notification stays active." else "Floating text stays visible while the overlay is running.",
-            iconRes = if (enabled) R.drawable.ic_check else R.drawable.ic_repeat,
-            iconTint = if (enabled) APP_SUCCESS else APP_SECONDARY_TEXT,
+        autoHideStatusView.text = if (enabled) {
+            "Floating text hides after $duration. Notification stays active."
+        } else {
+            "Floating text stays visible while the overlay is running."
+        }
+        autoHideStatusView.setTextColor(APP_TEXT_SECONDARY)
+        setButtonIcon(autoHideStatusView, null, APP_TEXT_SECONDARY)
+        autoHideDurationButton.text = "Visible for $duration"
+        autoHideDurationButton.setTextColor(if (enabled) APP_PRIMARY else APP_TEXT_SECONDARY)
+        autoHideDurationButton.background = roundedStrokeBackground(
+            color = if (enabled) APP_SURFACE else APP_SURFACE_CONTAINER_HIGH,
+            radius = 19,
+            strokeColor = APP_AI_SUBTLE_STROKE,
         )
-        configureActionButton(
-            button = autoHideDurationButton,
-            text = "Visible for $duration",
-            primary = false,
-            iconRes = R.drawable.ic_clock,
-        )
+        setButtonIcon(autoHideDurationButton, R.drawable.ic_clock, if (enabled) APP_PRIMARY else APP_TEXT_SECONDARY)
         setEnabledAnimated(autoHideDurationButton, enabled)
     }
 
@@ -1923,22 +2116,21 @@ class MainActivity : Activity() {
     }
 
     private fun showDeleteModelConfirmation() {
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Delete AI model?")
-            .setMessage("This removes the downloaded model from this phone. Built-in vocabulary will keep working, and you can download the model again later.")
-            .setNegativeButton("No", null)
-            .setPositiveButton("Yes, delete") { _, _ ->
-                performConfirmHaptic()
-                val deleted = aiModelManager.deleteModel()
-                Toast.makeText(
-                    this,
-                    if (deleted) "AI model deleted." else "Could not delete AI model.",
-                    Toast.LENGTH_SHORT,
-                ).show()
-                render()
-            }
-            .show()
-        dialog.getButton(Dialog.BUTTON_POSITIVE)?.setTextColor(APP_ERROR)
+        showConfirmationDialog(
+            title = "Delete AI model?",
+            message = "This removes the downloaded model from this phone. Built-in vocabulary will keep working, and you can download the model again later.",
+            positiveText = "Delete model",
+            destructive = true,
+        ) {
+            performConfirmHaptic()
+            val deleted = aiModelManager.deleteModel()
+            Toast.makeText(
+                this,
+                if (deleted) "AI model deleted." else "Could not delete AI model.",
+                Toast.LENGTH_SHORT,
+            ).show()
+            render()
+        }
     }
 
     private fun handleOverlayToggle() {
@@ -2150,10 +2342,11 @@ class MainActivity : Activity() {
         val activeSection = when (activeTab) {
             AppTab.LEARN -> learnSection
             AppTab.STYLE -> styleSection
+            AppTab.SCHEDULE -> schedulerSection
             AppTab.AI_LAB -> aiLabSection
             AppTab.DEVICE -> deviceSection
         }
-        listOf(learnSection, styleSection, aiLabSection, deviceSection).forEach { section ->
+        listOf(learnSection, styleSection, schedulerSection, aiLabSection, deviceSection).forEach { section ->
             section.visibility = if (section == activeSection) View.VISIBLE else View.GONE
         }
         if (animate) {
@@ -2352,6 +2545,25 @@ class MainActivity : Activity() {
             addView(textView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
 
+    private fun compactStatusPanel(textView: TextView, iconRes: Int): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+            background = roundedBackground(APP_MUTED_SURFACE, radius = 16)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            addView(
+                iconBadge(
+                    iconRes = iconRes,
+                    iconTint = APP_SECONDARY_TEXT,
+                    backgroundColor = APP_SURFACE,
+                    sizeDp = 30,
+                ),
+                LinearLayout.LayoutParams(dp(30), dp(30)),
+            )
+            textView.setPadding(dp(10), 0, 0, 0)
+            addView(textView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+
     private fun aiMetaRow(label: String, value: String, iconRes: Int): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -2500,12 +2712,12 @@ class MainActivity : Activity() {
             text = "$label\n0"
             gravity = Gravity.CENTER
             setTextColor(APP_TEXT_PRIMARY)
-            textSize = 15f
+            textSize = 13f
             typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
             includeFontPadding = true
-            minHeight = dp(76)
-            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 18, strokeColor = APP_AI_SUBTLE_STROKE)
-            setPadding(dp(10), dp(10), dp(10), dp(10))
+            minHeight = dp(62)
+            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 14, strokeColor = APP_AI_SUBTLE_STROKE)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
         }
 
     private fun statusPill(): TextView =
@@ -2977,6 +3189,7 @@ class MainActivity : Activity() {
     private enum class AppTab(val title: String, val iconRes: Int) {
         LEARN("Learn", R.drawable.ic_learn),
         STYLE("Style", R.drawable.ic_style),
+        SCHEDULE("Schedule", R.drawable.ic_clock),
         AI_LAB("AI Lab", R.drawable.ic_sparkle),
         DEVICE("Device", R.drawable.ic_device),
     }
@@ -2993,16 +3206,14 @@ class MainActivity : Activity() {
     private class VocabularyProgressChartView(context: android.content.Context) : View(context) {
         private var stats: List<DailyLearningStats> = emptyList()
         private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-        private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 2.5f * resources.displayMetrics.density
-            color = Color.parseColor("#374953")
-        }
         private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#3E4945")
-            textSize = 12f * resources.displayMetrics.scaledDensity
+            textSize = 10.5f * resources.displayMetrics.scaledDensity
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
         }
+        private val trackPath = Path()
+        private val trackRect = RectF()
+        private val dotRadius = 3.5f * resources.displayMetrics.density
 
         fun setStats(value: List<DailyLearningStats>) {
             stats = value
@@ -3011,17 +3222,19 @@ class MainActivity : Activity() {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            val data = stats.ifEmpty { return }
-            val left = paddingLeft + 8f
-            val top = paddingTop + 12f
-            val right = width - paddingRight - 8f
-            val bottom = height - paddingBottom - 34f
-            if (right <= left || bottom <= top) return
+            val latest = stats.lastOrNull() ?: return
+            val left = paddingLeft + 6f
+            val right = width - paddingRight - 6f
+            if (right <= left) return
 
-            val totals = data.map {
-                it.newCount + it.learningCount + it.familiarCount + it.stableCount + it.masteredCount
-            }
-            val maxTotal = totals.maxOrNull()?.coerceAtLeast(1) ?: 1
+            val counts = intArrayOf(
+                latest.newCount,
+                latest.learningCount,
+                latest.familiarCount,
+                latest.stableCount,
+                latest.masteredCount,
+            )
+            val labels = arrayOf("New", "Learning", "Familiar", "Stable", "Mastered")
             val colors = intArrayOf(
                 Color.parseColor("#DCE8E2"),
                 Color.parseColor("#BFD7CF"),
@@ -3029,44 +3242,115 @@ class MainActivity : Activity() {
                 Color.parseColor("#43A78D"),
                 Color.parseColor("#006D5B"),
             )
-            val layers = listOf<(DailyLearningStats) -> Int>(
-                { it.newCount },
-                { it.learningCount },
-                { it.familiarCount },
-                { it.stableCount },
-                { it.masteredCount },
-            )
 
-            val cumulative = MutableList(data.size) { 0 }
-            layers.forEachIndexed { layerIndex, valueFor ->
-                val previous = cumulative.toList()
-                data.indices.forEach { index -> cumulative[index] += valueFor(data[index]) }
-                val path = Path()
-                data.indices.forEach { index ->
-                    val x = xFor(index, data.size, left, right)
-                    val y = yFor(cumulative[index], maxTotal, top, bottom)
-                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            val barTop = paddingTop + 20f
+            val barHeight = 18f * resources.displayMetrics.density
+            trackRect.set(left, barTop, right, barTop + barHeight)
+            val radius = barHeight / 2f
+            fillPaint.shader = null
+            fillPaint.color = Color.parseColor("#E8EFEB")
+            canvas.drawRoundRect(trackRect, radius, radius, fillPaint)
+
+            val total = counts.sum().coerceAtLeast(1)
+            var segmentLeft = left
+            trackPath.reset()
+            trackPath.addRoundRect(trackRect, radius, radius, Path.Direction.CW)
+            canvas.save()
+            canvas.clipPath(trackPath)
+            counts.forEachIndexed { index, count ->
+                if (count <= 0) return@forEachIndexed
+                val segmentRight = if (index == counts.lastIndex) {
+                    right
+                } else {
+                    segmentLeft + ((right - left) * count.toFloat() / total.toFloat())
                 }
-                data.indices.reversed().forEach { index ->
-                    path.lineTo(xFor(index, data.size, left, right), yFor(previous[index], maxTotal, top, bottom))
-                }
-                path.close()
-                fillPaint.color = colors[layerIndex]
-                canvas.drawPath(path, fillPaint)
+                fillPaint.color = colors[index]
+                canvas.drawRect(segmentLeft, trackRect.top, segmentRight, trackRect.bottom, fillPaint)
+                segmentLeft = segmentRight
             }
+            canvas.restore()
 
-            canvas.drawLine(left, bottom, right, bottom, linePaint)
-            canvas.drawText("New", left, height - 10f, labelPaint)
-            canvas.drawText("Learning", left + (right - left) * 0.22f, height - 10f, labelPaint)
-            canvas.drawText("Familiar", left + (right - left) * 0.50f, height - 10f, labelPaint)
-            canvas.drawText("Mastered", left + (right - left) * 0.76f, height - 10f, labelPaint)
+            drawLegend(canvas, labels, colors, left, trackRect.bottom + 28f)
         }
 
-        private fun xFor(index: Int, count: Int, left: Float, right: Float): Float =
-            if (count <= 1) left else left + ((right - left) * index.toFloat() / (count - 1).toFloat())
+        private fun drawLegend(canvas: Canvas, labels: Array<String>, colors: IntArray, left: Float, top: Float) {
+            val rowGap = 22f * resources.displayMetrics.density
+            val columnWidth = (width - paddingLeft - paddingRight - 12f) / 3f
+            labels.forEachIndexed { index, label ->
+                val row = if (index < 3) 0 else 1
+                val column = if (index < 3) index else index - 3
+                val x = left + column * columnWidth
+                val y = top + row * rowGap
+                fillPaint.shader = null
+                fillPaint.color = colors[index]
+                canvas.drawCircle(x + dotRadius, y - dotRadius, dotRadius, fillPaint)
+                canvas.drawText(label, x + dotRadius * 3f, y, labelPaint)
+            }
+        }
+    }
 
-        private fun yFor(value: Int, maxTotal: Int, top: Float, bottom: Float): Float =
-            bottom - ((bottom - top) * value.toFloat() / maxTotal.toFloat())
+    private class ShimmerCardDrawable(
+        private val startColor: Int,
+        private val endColor: Int,
+        private val shimmerColor: Int,
+        private val radiusPx: Float,
+    ) : Drawable() {
+        private val rect = RectF()
+        private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val shimmerPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var progress = 0f
+        private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 3_200L
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.RESTART
+            addUpdateListener {
+                progress = it.animatedValue as Float
+                invalidateSelf()
+            }
+            start()
+        }
+
+        override fun draw(canvas: Canvas) {
+            rect.set(bounds)
+            if (rect.isEmpty) return
+
+            basePaint.shader = LinearGradient(
+                rect.left,
+                rect.top,
+                rect.right,
+                rect.bottom,
+                startColor,
+                endColor,
+                Shader.TileMode.CLAMP,
+            )
+            canvas.drawRoundRect(rect, radiusPx, radiusPx, basePaint)
+
+            val width = rect.width()
+            val shimmerCenter = rect.left - width * 0.45f + width * 1.9f * progress
+            shimmerPaint.shader = LinearGradient(
+                shimmerCenter - width * 0.24f,
+                rect.top,
+                shimmerCenter + width * 0.24f,
+                rect.bottom,
+                intArrayOf(Color.TRANSPARENT, shimmerColor, Color.TRANSPARENT),
+                floatArrayOf(0f, 0.5f, 1f),
+                Shader.TileMode.CLAMP,
+            )
+            canvas.drawRoundRect(rect, radiusPx, radiusPx, shimmerPaint)
+        }
+
+        override fun setAlpha(alpha: Int) {
+            basePaint.alpha = alpha
+            shimmerPaint.alpha = alpha
+        }
+
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+            basePaint.colorFilter = colorFilter
+            shimmerPaint.colorFilter = colorFilter
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
 
     private class DottedWarningDrawable(
@@ -3147,6 +3431,7 @@ class MainActivity : Activity() {
         private val APP_SURFACE_CONTAINER_HIGH = Color.parseColor("#E5E9E6")
         private val PREVIEW_BACKGROUND = Color.parseColor("#2D3130")
         private val APP_PREVIEW_DEEP = Color.parseColor("#141918")
+        private val PREVIEW_SHIMMER = Color.parseColor("#26FFFFFF")
         private val APP_TEXT_PRIMARY = Color.parseColor("#181C1B")
         private val APP_TEXT_SECONDARY = Color.parseColor("#3E4945")
         private val APP_INVERSE_TEXT = Color.parseColor("#EEF2EE")

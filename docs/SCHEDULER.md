@@ -4,7 +4,7 @@ FlipWords uses adaptive spaced-repetition for passive exposure. It estimates pro
 
 ## Why Fixed Rotation Was Removed
 
-A fixed 90-minute rotator changes words while the user is asleep, away, working out, or not likely to see the cover screen. FlipWords now treats 90 minutes as `DEFAULT_MINIMUM_SPACING_MINUTES`, a minimum spacing target, not the product model.
+A fixed rotator changes words while the user is asleep, away, working out, or not likely to see the cover screen. FlipWords treats `DEFAULT_MINIMUM_SPACING_MINUTES` as the starting minimum spacing target; users can adjust that target from the Schedule tab.
 
 ## Flow
 

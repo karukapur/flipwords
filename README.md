@@ -23,7 +23,7 @@ Honesty note: the current version estimates familiarity from passive exposure si
 
 ## Learning Model
 
-FlipWords no longer presents learning as a fixed-frequency word rotator. The internal scheduler still uses a 90-minute default minimum spacing target, but words change only when the phone context suggests a reasonable exposure opportunity.
+FlipWords no longer presents learning as a fixed-frequency word rotator. The scheduler starts with a 90-minute default minimum spacing target, which can be adjusted from the Schedule tab, and words change only when the phone context suggests a reasonable exposure opportunity.
 
 The scheduler uses:
 
