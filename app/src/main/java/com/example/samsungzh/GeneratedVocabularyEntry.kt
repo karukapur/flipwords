@@ -7,5 +7,5 @@ data class GeneratedVocabularyEntry(
     val source: String,
     val createdAtMillis: Long,
 ) {
-    fun toWordEntry(): WordEntry = WordEntry(hanzi, pinyin, english)
+    fun toWordEntry(): WordEntry = WordEntry(hanzi, pinyin, english, hskLevel = null)
 }

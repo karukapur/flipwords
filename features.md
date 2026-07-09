@@ -35,22 +35,23 @@ This document describes the current FlipWords feature set. It is meant to be a p
   - Built-in Hanzi entries are unique.
   - Known Simplified-only characters are not present.
 
-## Word Rotation
+## Adaptive Scheduler
 
-- Default word change interval is 90 minutes.
-- Word-change frequency is shown as one simple current-value row with a `Change frequency` action.
-- The frequency picker offers common presets: `5 sec`, `1 min`, `15 min`, `30 min`, `60 min`, and `90 min`.
-- A `Custom...` option supports seconds, minutes, and hours, clamped to the supported 5-second to 90-minute range.
-- The current word is calculated from:
-  - An anchor timestamp.
-  - The configured interval.
-  - The active vocabulary bucket size.
-- Missed background updates recover naturally because the current word is recomputed from time.
-- Manual next-word behavior repins the anchor so the selected next word becomes current.
-- WorkManager schedules periodic background refresh work.
-  - Android WorkManager has a practical minimum periodic interval of about 15 minutes.
-  - Very short test intervals are most reliable while the foreground overlay service is running.
-- Word rotation is restored after app restart and phone reboot.
+- FlipWords uses context-aware scheduling instead of presenting learning as a fixed-frequency rotator.
+- The scheduler uses a 90-minute default minimum spacing target internally.
+- Words change only when the phone context suggests a reasonable exposure opportunity.
+- The current word is selected from:
+  - Word progress.
+  - Effective exposure.
+  - Estimated half-life.
+  - Predicted recall.
+  - Hidden/mastered/retired state.
+  - Review/new balancing.
+- Screen-off and long inactive periods pause rotation.
+- Missed slots are not queued after sleep-like inactivity.
+- Manual next-word behavior records a tap signal and asks the adaptive scheduler for another word.
+- WorkManager schedules periodic background refresh work at Android's practical minimum cadence.
+- Word progress is restored after app restart and phone reboot.
 
 ## Main App UI
 
@@ -62,8 +63,8 @@ This document describes the current FlipWords feature set. It is meant to be a p
 - Uses a warm ivory background, deep jade primary actions, muted tonal surfaces, pill-shaped controls, large rounded "digital paper" cards, and subtle shadows.
 - Uses tonal layering plus restrained Material-style elevation instead of heavy card shadows.
 - Main app sections:
-  - `Learn` for the app logo/header, current-word learning card, and overlay/next-word actions.
-  - `Style` for overlay preview, text size controls, color swatches, and word timing.
+  - `Learn` for the app logo/header, current-word learning card, estimated progress stats, HSK filters, and overlay/next-word actions.
+  - `Style` for overlay preview, text size controls, color swatches, and adaptive scheduler/auto-hide controls.
   - `AI Lab` for model download, local generation, source mode, scheduling, and failure-log recovery prompts.
   - `Device` for overlay permission, rotation, display, and debug status.
 - Handles status-bar and navigation-bar padding so content does not sit underneath system bars.
@@ -72,7 +73,7 @@ This document describes the current FlipWords feature set. It is meant to be a p
 - Uses Android system font fallbacks:
   - Serif fallback for the main Hanzi learning card.
   - Sans-serif fallback for pinyin, English, labels, and controls.
-- The Learn card shows lightweight metrics for next rotation time, active word bucket size, and current frequency.
+- The Learn card shows lightweight metrics for next adaptive opportunity, active word bucket size, and current estimated word state.
 - Buttons and navigation tabs use subtle press/scale feedback.
 - Tab changes and word changes use short fade/slide transitions.
 - Primary actions include small inline icons for faster scanning.
@@ -104,7 +105,7 @@ This document describes the current FlipWords feature set. It is meant to be a p
 - Overlay text can be tapped to advance to the next word when touch is permitted.
 - Auto-hide is enabled by default:
   - Floating text detaches after 10 seconds.
-  - The setting can be toggled in the Word timing card.
+  - The setting can be toggled in the adaptive scheduler card.
   - The visible duration can be changed from 3-60 seconds.
   - The foreground notification stays active after the floating text hides.
   - The floating overlay is retried when the screen wakes or display state changes.
@@ -321,7 +322,7 @@ This document describes the current FlipWords feature set. It is meant to be a p
 - `ChineseWordApplication`
   - Schedules word update work on app startup.
 - `WordUpdateScheduler`
-  - Schedules periodic WorkManager refresh work for word rotation.
+  - Schedules periodic WorkManager refresh work for adaptive scheduling.
 - `WordUpdateWorker`
   - Touches the current word so background state stays warm.
 - `CoverOverlayService`
@@ -335,12 +336,16 @@ This document describes the current FlipWords feature set. It is meant to be a p
 
 ## Tests
 
-- Word rotation tests cover:
-  - Same word within the 90-minute window.
-  - Advance after 90 minutes.
-  - Custom short intervals.
-  - Wrapping at the end of vocabulary.
-  - Times before anchor.
+- Scheduler tests cover:
+  - Half-life growth and cap.
+  - Predicted recall decay.
+  - Exposure scoring.
+  - Sleep/no-burn pause behavior.
+  - Review eligibility.
+  - Hidden words.
+  - Mastered maintenance.
+  - Prompt display modes.
+  - Daily stats and HSK filtering.
 - Vocabulary tests cover:
   - 500 built-in entries.
   - No duplicate built-in Hanzi.

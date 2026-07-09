@@ -1,52 +1,75 @@
 package com.example.samsungzh
 
 import android.content.Context
+import java.util.UUID
 
 class WordRepository(context: Context) {
-    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val overlayPreferences = OverlayPreferences(context)
-    private val aiLabPreferences = AiLabPreferences(context)
-    private val generatedVocabularyStore = GeneratedVocabularyStore(context)
+    private val appContext = context.applicationContext
+    private val progressStore = WordProgressStore(appContext)
+    private val sessionLogger = DisplaySessionLogger(appContext)
+    private val phoneStateDetector = PhoneStateDetector(appContext)
+    private val aiLabPreferences = AiLabPreferences(appContext)
+    private val generatedVocabularyStore = GeneratedVocabularyStore(appContext)
 
-    fun currentWord(nowMillis: Long = System.currentTimeMillis()): WordEntry {
-        val words = activeWords()
-        val anchor = ensureAnchor(nowMillis)
-        val index = WordRotator.indexFor(
-            nowMillis = nowMillis,
-            anchorMillis = anchor,
-            wordCount = words.size,
-            intervalMillis = overlayPreferences.rotationIntervalMillis,
+    fun currentWord(nowMillis: Long = System.currentTimeMillis()): WordEntry =
+        schedulerTick(nowMillis).word
+
+    fun currentOverlayCard(nowMillis: Long = System.currentTimeMillis()): OverlayCard {
+        val info = schedulerTick(nowMillis)
+        return OverlayCard(
+            word = info.word,
+            displayMode = info.displayMode,
         )
-        return words[index]
     }
 
     fun advanceWord(nowMillis: Long = System.currentTimeMillis()): WordEntry {
-        val words = activeWords()
-        val current = currentWord(nowMillis)
-        val currentIndex = words.indexOf(current).coerceAtLeast(0)
-        val nextIndex = (currentIndex + 1) % words.size
-        prefs.edit()
-            .putLong(KEY_ANCHOR_MILLIS, nowMillis - (nextIndex.toLong() * overlayPreferences.rotationIntervalMillis))
-            .apply()
-        return words[nextIndex]
+        recordTap(nowMillis)
+        val state = phoneStateDetector.currentState(nowMillis)
+        return schedulerTick(
+            nowMillis = nowMillis,
+            phoneLearningState = state,
+            forceRotate = true,
+        ).word
     }
 
     fun pinWord(word: WordEntry, nowMillis: Long = System.currentTimeMillis()) {
-        val index = activeWords().indexOf(word).coerceAtLeast(0)
-        prefs.edit()
-            .putLong(KEY_ANCHOR_MILLIS, nowMillis - (index.toLong() * overlayPreferences.rotationIntervalMillis))
-            .apply()
+        val progressById = progressStore.loadProgress().toMutableMap()
+        val wordId = word.stableId()
+        val progress = markDisplayed(
+            progress = progressById[wordId] ?: WordProgress(wordId),
+            nowMillis = nowMillis,
+        )
+        progressById[wordId] = progress
+        progressStore.saveProgress(progressById)
+        progressStore.setCurrent(wordId, WordSelectionScheduler.displayModeFor(progress, word, nowMillis))
+        startNewSession(wordId, progressStore.currentDisplayMode(), nowMillis)
     }
 
     fun rotationInfo(nowMillis: Long = System.currentTimeMillis()): RotationInfo {
-        val anchor = ensureAnchor(nowMillis)
-        val intervalMillis = overlayPreferences.rotationIntervalMillis
-        val elapsed = (nowMillis - anchor).coerceAtLeast(0L)
-        val currentSlotStart = anchor + ((elapsed / intervalMillis) * intervalMillis)
+        val info = adaptiveRotationInfo(nowMillis)
         return RotationInfo(
-            currentWord = currentWord(nowMillis),
-            nextRotationMillis = currentSlotStart + intervalMillis,
-            intervalMillis = intervalMillis,
+            currentWord = info.currentWord,
+            nextRotationMillis = info.nextOpportunityMillis,
+            intervalMillis = info.minimumSpacingMillis,
+        )
+    }
+
+    fun adaptiveRotationInfo(nowMillis: Long = System.currentTimeMillis()): AdaptiveRotationInfo {
+        val state = phoneStateDetector.currentState(nowMillis)
+        val decision = schedulerTick(nowMillis, state)
+        val nextOpportunity = decision.progress.nextEligibleAt
+            ?: (nowMillis + SchedulerConfig.DEFAULT_MINIMUM_SPACING_MILLIS)
+        return AdaptiveRotationInfo(
+            currentWord = decision.word,
+            displayMode = decision.displayMode,
+            nextOpportunityMillis = if (decision.paused) {
+                nowMillis + SchedulerConfig.MILLIS_PER_MINUTE * 15L
+            } else {
+                nextOpportunity
+            },
+            minimumSpacingMillis = SchedulerConfig.DEFAULT_MINIMUM_SPACING_MILLIS,
+            phoneLearningState = state,
+            progress = decision.progress,
         )
     }
 
@@ -59,18 +82,182 @@ class WordRepository(context: Context) {
         )
     }
 
-    private fun ensureAnchor(nowMillis: Long): Long {
-        val existing = prefs.getLong(KEY_ANCHOR_MILLIS, NO_ANCHOR)
-        if (existing != NO_ANCHOR) return existing
+    fun progressById(nowMillis: Long = System.currentTimeMillis()): Map<String, WordProgress> =
+        progressStore.loadProgress().mapValues { (_, progress) ->
+            EffectiveExposureCalculator.update(progress, nowMillis)
+        }
 
-        prefs.edit().putLong(KEY_ANCHOR_MILLIS, nowMillis).apply()
-        return nowMillis
+    fun compactSessions(): List<DisplaySession> = sessionLogger.compactSessions()
+
+    fun hideCurrentWord(nowMillis: Long = System.currentTimeMillis()) {
+        val current = currentWord(nowMillis)
+        val id = current.stableId()
+        val progressById = progressStore.loadProgress().toMutableMap()
+        progressById[id] = (progressById[id] ?: WordProgress(id)).copy(
+            status = WordStatus.HIDDEN,
+            isHidden = true,
+        )
+        progressStore.saveProgress(progressById)
+        schedulerTick(nowMillis = nowMillis, forceRotate = true)
     }
 
-    private companion object {
-        const val PREFS_NAME = "chinese_word_state"
-        const val KEY_ANCHOR_MILLIS = "anchor_millis"
-        const val NO_ANCHOR = -1L
+    fun restoreHiddenWords() {
+        val updated = progressStore.loadProgress().mapValues { (_, progress) ->
+            if (progress.status == WordStatus.HIDDEN || progress.isHidden) {
+                progress.copy(status = WordStatus.LEARNING, isHidden = false)
+            } else {
+                progress
+            }
+        }
+        progressStore.saveProgress(updated)
+    }
+
+    fun resetCurrentWordProgress(nowMillis: Long = System.currentTimeMillis()) {
+        val current = currentWord(nowMillis)
+        val updated = progressStore.loadProgress().toMutableMap()
+        updated[current.stableId()] = WordProgress(current.stableId())
+        progressStore.saveProgress(updated)
+        progressStore.setCurrent(current.stableId(), DisplayMode.FULL_CARD)
+        startNewSession(current.stableId(), DisplayMode.FULL_CARD, nowMillis)
+    }
+
+    fun recordPhoneEvent(action: String?, nowMillis: Long = System.currentTimeMillis()) {
+        phoneStateDetector.recordSystemIntent(action, nowMillis)
+        val state = phoneStateDetector.currentState(nowMillis)
+        schedulerTick(nowMillis, state)
+    }
+
+    fun recordFullAppOpen(nowMillis: Long = System.currentTimeMillis()) {
+        phoneStateDetector.recordFullAppOpen(nowMillis)
+        val session = sessionLogger.activeSession()
+        if (session != null) {
+            sessionLogger.saveActiveSession(
+                session.accountUntil(nowMillis, PhoneLearningState.FULL_APP_LEARNING)
+                    .copy(fullAppOpenCount = session.fullAppOpenCount + 1),
+            )
+        }
+        schedulerTick(nowMillis, PhoneLearningState.FULL_APP_LEARNING)
+    }
+
+    private fun recordTap(nowMillis: Long) {
+        val state = phoneStateDetector.currentState(nowMillis)
+        val session = sessionLogger.activeSession()
+        if (session != null) {
+            sessionLogger.saveActiveSession(
+                session.accountUntil(nowMillis, state).copy(tapCount = session.tapCount + 1),
+            )
+        }
+    }
+
+    private fun schedulerTick(
+        nowMillis: Long,
+        phoneLearningState: PhoneLearningState = phoneStateDetector.currentState(nowMillis),
+        forceRotate: Boolean = false,
+    ): SchedulerDecision {
+        val words = activeWords()
+        var progressById = progressStore.loadProgress().toMutableMap()
+        accountActiveSession(nowMillis, phoneLearningState, progressById, endSession = false)
+
+        val decision = WordSelectionScheduler.selectWord(
+            words = words,
+            progressById = progressById,
+            currentWordId = progressStore.currentWordId(),
+            nowMillis = nowMillis,
+            phoneLearningState = phoneLearningState,
+            forceRotate = forceRotate,
+        )
+
+        if (decision.paused) {
+            progressStore.saveProgress(progressById)
+            return decision
+        }
+
+        val currentId = progressStore.currentWordId()
+        if (decision.rotated || currentId == null || sessionLogger.activeSession() == null) {
+            progressById = progressStore.loadProgress().toMutableMap()
+            accountActiveSession(nowMillis, phoneLearningState, progressById, endSession = true)
+            val displayed = markDisplayed(
+                progress = progressById[decision.word.stableId()] ?: WordProgress(decision.word.stableId()),
+                nowMillis = nowMillis,
+            )
+            progressById[decision.word.stableId()] = displayed
+            progressStore.saveProgress(progressById)
+            progressStore.setCurrent(decision.word.stableId(), decision.displayMode)
+            startNewSession(decision.word.stableId(), decision.displayMode, nowMillis)
+            return decision.copy(progress = displayed)
+        }
+
+        progressStore.saveProgress(progressById)
+        return decision
+    }
+
+    private fun accountActiveSession(
+        nowMillis: Long,
+        state: PhoneLearningState,
+        progressById: MutableMap<String, WordProgress>,
+        endSession: Boolean,
+    ) {
+        val active = sessionLogger.activeSession() ?: return
+        val accounted = active.accountUntil(nowMillis, state)
+        if (endSession) {
+            val finished = accounted.toFinishedSession(nowMillis)
+            sessionLogger.appendSession(finished)
+            sessionLogger.clearActiveSession()
+            val existing = progressById[finished.wordId] ?: WordProgress(finished.wordId)
+            progressById[finished.wordId] = EffectiveExposureCalculator.update(
+                existing.copy(
+                    totalVisibleMillis = existing.totalVisibleMillis + finished.rawDurationMillis,
+                    totalEligibleExposureMillis = existing.totalEligibleExposureMillis +
+                        finished.eligibleExposureMillis,
+                    unlocksWhileActive = existing.unlocksWhileActive + finished.unlockCount,
+                    fullAppOpensWhileActive = existing.fullAppOpensWhileActive + finished.fullAppOpenCount,
+                    tapsWhileActive = existing.tapsWhileActive + finished.tapCount,
+                ),
+                nowMillis,
+            )
+        } else {
+            sessionLogger.saveActiveSession(accounted)
+        }
+    }
+
+    private fun markDisplayed(progress: WordProgress, nowMillis: Long): WordProgress {
+        val previousLastSeen = progress.lastSeenAt
+        val distinctDays = if (previousLastSeen == null || epochDay(previousLastSeen) != epochDay(nowMillis)) {
+            progress.distinctDaysSeen + 1
+        } else {
+            progress.distinctDaysSeen
+        }
+        val spacedReappearances = if (
+            previousLastSeen != null &&
+            nowMillis - previousLastSeen >= SchedulerConfig.DEFAULT_MINIMUM_SPACING_MILLIS
+        ) {
+            progress.spacedReappearances + 1
+        } else {
+            progress.spacedReappearances
+        }
+        return EffectiveExposureCalculator.update(
+            progress.copy(
+                timesDisplayed = progress.timesDisplayed + 1,
+                firstSeenAt = progress.firstSeenAt ?: nowMillis,
+                lastSeenAt = nowMillis,
+                distinctDaysSeen = distinctDays,
+                spacedReappearances = spacedReappearances,
+                nextEligibleAt = nowMillis + SchedulerConfig.DEFAULT_MINIMUM_SPACING_MILLIS,
+            ),
+            nowMillis,
+        )
+    }
+
+    private fun startNewSession(wordId: String, displayMode: DisplayMode, nowMillis: Long) {
+        sessionLogger.saveActiveSession(
+            ActiveDisplaySession(
+                id = UUID.randomUUID().toString(),
+                wordId = wordId,
+                startedAt = nowMillis,
+                lastAccountedAt = nowMillis,
+                displayMode = displayMode,
+            ),
+        )
     }
 }
 
@@ -78,4 +265,9 @@ data class RotationInfo(
     val currentWord: WordEntry,
     val nextRotationMillis: Long,
     val intervalMillis: Long,
+)
+
+data class OverlayCard(
+    val word: WordEntry,
+    val displayMode: DisplayMode,
 )

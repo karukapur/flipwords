@@ -36,6 +36,8 @@ object Vocabulary {
         WordEntry("昨天", "zuo tian", "yesterday"),
         WordEntry("喜歡", "xi huan", "to like"),
         WordEntry("知道", "zhi dao", "to know"),
+        WordEntry("記得", "ji de", "to remember"),
+        WordEntry("您好", "nin hao", "hello"),
         WordEntry("可以", "ke yi", "can; may"),
         WordEntry("因為", "yin wei", "because"),
         WordEntry("所以", "suo yi", "therefore"),

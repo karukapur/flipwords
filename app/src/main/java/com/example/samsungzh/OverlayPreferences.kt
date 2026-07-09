@@ -37,12 +37,6 @@ class OverlayPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_OVERLAY_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_OVERLAY_ENABLED, value).apply()
 
-    var rotationIntervalSeconds: Int
-        get() = prefs.getInt(KEY_ROTATION_INTERVAL_SECONDS, DEFAULT_ROTATION_INTERVAL_SECONDS)
-        set(value) = prefs.edit()
-            .putInt(KEY_ROTATION_INTERVAL_SECONDS, value.coerceIn(MIN_ROTATION_INTERVAL_SECONDS, MAX_ROTATION_INTERVAL_SECONDS))
-            .apply()
-
     var autoHideEnabled: Boolean
         get() = prefs.getBoolean(KEY_AUTO_HIDE_ENABLED, DEFAULT_AUTO_HIDE_ENABLED)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_HIDE_ENABLED, value).apply()
@@ -52,9 +46,6 @@ class OverlayPreferences(context: Context) {
         set(value) = prefs.edit()
             .putInt(KEY_AUTO_HIDE_SECONDS, value.coerceIn(MIN_AUTO_HIDE_SECONDS, MAX_AUTO_HIDE_SECONDS))
             .apply()
-
-    val rotationIntervalMillis: Long
-        get() = rotationIntervalSeconds * 1000L
 
     val autoHideMillis: Long
         get() = autoHideSeconds * 1000L
@@ -69,7 +60,6 @@ class OverlayPreferences(context: Context) {
         private const val KEY_ENGLISH_COLOR = "english_color"
         private const val KEY_OVERLAY_STATUS = "overlay_status"
         private const val KEY_OVERLAY_ENABLED = "overlay_enabled"
-        private const val KEY_ROTATION_INTERVAL_SECONDS = "rotation_interval_seconds"
         private const val KEY_AUTO_HIDE_ENABLED = "auto_hide_enabled"
         private const val KEY_AUTO_HIDE_SECONDS = "auto_hide_seconds"
 
@@ -87,11 +77,6 @@ class OverlayPreferences(context: Context) {
         const val MAX_PINYIN_SIZE = 28
         const val MIN_ENGLISH_SIZE = 10
         const val MAX_ENGLISH_SIZE = 32
-
-        const val DEFAULT_ROTATION_INTERVAL_SECONDS = 90 * 60
-        const val MIN_ROTATION_INTERVAL_SECONDS = 5
-        const val MAX_ROTATION_INTERVAL_SECONDS = 90 * 60
-        const val ROTATION_INTERVAL_STEP_SECONDS = 5
 
         const val DEFAULT_AUTO_HIDE_ENABLED = true
         const val DEFAULT_AUTO_HIDE_SECONDS = 10

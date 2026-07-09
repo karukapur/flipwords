@@ -62,9 +62,13 @@ class CoverOverlayService : Service() {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_ON,
                 Intent.ACTION_USER_PRESENT,
-                Intent.ACTION_DREAMING_STOPPED -> reattachOverlay()
+                Intent.ACTION_DREAMING_STOPPED -> {
+                    repository.recordPhoneEvent(intent.action)
+                    reattachOverlay()
+                }
 
                 Intent.ACTION_SCREEN_OFF -> {
+                    repository.recordPhoneEvent(intent.action)
                     if (overlayPreferences.autoHideEnabled) {
                         hideOverlayForAutoHide()
                     }
@@ -294,11 +298,31 @@ class CoverOverlayService : Service() {
     }
 
     private fun currentOverlayPhrase(): OverlayPhrase {
-        val word = repository.currentWord()
+        val card = repository.currentOverlayCard()
+        val word = card.word
+        val formattedPinyin = PinyinToneFormatter.format(word)
+        val pinyinPrompt = "Do you recall the Hanzi for \"${formattedPinyin}\"?"
+        val meaningPrompt = "Which word means \"${word.english}\"?"
         return OverlayPhrase(
-            hanzi = word.hanzi,
-            pinyin = PinyinToneFormatter.format(word),
-            english = word.english,
+            hanzi = when (card.displayMode) {
+                DisplayMode.MEANING_PROMPT -> meaningPrompt
+                DisplayMode.PINYIN_PROMPT -> pinyinPrompt
+                DisplayMode.HANZI_ONLY -> word.hanzi
+                else -> word.hanzi
+            },
+            pinyin = when (card.displayMode) {
+                DisplayMode.MEANING_PROMPT,
+                DisplayMode.PINYIN_PROMPT,
+                DisplayMode.HANZI_ONLY -> ""
+                else -> formattedPinyin
+            },
+            english = when (card.displayMode) {
+                DisplayMode.MEANING_PROMPT,
+                DisplayMode.PINYIN_PROMPT -> "Passive prompt"
+                DisplayMode.HANZI_ONLY -> ""
+                DisplayMode.REVEAL_CARD -> "Reveal: ${word.english}"
+                else -> word.english
+            },
         )
     }
 
@@ -307,6 +331,10 @@ class CoverOverlayService : Service() {
         overlayView?.findViewById<TextView>(R.id.overlay_hanzi)?.text = phrase.hanzi
         overlayView?.findViewById<TextView>(R.id.overlay_pinyin)?.text = phrase.pinyinDisplay
         overlayView?.findViewById<TextView>(R.id.overlay_english)?.text = phrase.english
+        overlayView?.findViewById<TextView>(R.id.overlay_pinyin)?.visibility =
+            if (phrase.pinyin.isBlank()) View.GONE else View.VISIBLE
+        overlayView?.findViewById<TextView>(R.id.overlay_english)?.visibility =
+            if (phrase.english.isBlank()) View.GONE else View.VISIBLE
         if (phraseChanged) {
             overlayView?.let { animateOverlayIn(it) }
         }
@@ -565,7 +593,7 @@ class CoverOverlayService : Service() {
         val pinyin: String,
         val english: String,
     ) {
-        val pinyinDisplay: String = "[$pinyin]"
+        val pinyinDisplay: String = if (pinyin.isBlank()) "" else "[$pinyin]"
     }
 
     companion object {

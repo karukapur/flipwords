@@ -1,0 +1,54 @@
+package com.example.samsungzh
+
+object SchedulerConfig {
+    const val DEFAULT_MINIMUM_SPACING_MINUTES = 90L
+
+    const val BASE_HALF_LIFE_HOURS = 2.0
+    const val HALF_LIFE_GROWTH_FACTOR = 1.45
+    const val MAX_HALF_LIFE_HOURS = 24.0 * 30.0
+
+    const val REVIEW_RECALL_THRESHOLD = 0.80
+    const val TOO_SOON_RECALL_THRESHOLD = 0.90
+
+    const val INACTIVITY_PAUSE_THRESHOLD_MINUTES = 90L
+
+    const val DEFAULT_NEW_WORD_RATIO = 0.70
+    const val DEFAULT_REVIEW_WORD_RATIO = 0.30
+
+    const val OVERDUE_HEAVY_REVIEW_RATIO = 0.50
+    const val LOW_OVERDUE_REVIEW_RATIO = 0.20
+
+    const val SCREEN_EXPOSURE_UNIT_MINUTES = 10.0
+    const val MAX_SCREEN_EXPOSURE_UNITS_PER_SESSION = 3.0
+
+    const val MASTERED_MIN_EFFECTIVE_EXPOSURES = 12.0
+    const val MASTERED_MIN_DISTINCT_DAYS = 5
+    const val MASTERED_MIN_HALF_LIFE_HOURS = 168.0
+
+    const val STABLE_MIN_EFFECTIVE_EXPOSURES = 8.0
+    const val STABLE_MIN_DISTINCT_DAYS = 3
+    const val STABLE_MIN_HALF_LIFE_HOURS = 72.0
+
+    const val RARE_MAINTENANCE_REVIEW_DAYS = 30L
+
+    const val MILLIS_PER_MINUTE = 60_000L
+    const val MILLIS_PER_HOUR = 60L * MILLIS_PER_MINUTE
+    const val MILLIS_PER_DAY = 24L * MILLIS_PER_HOUR
+
+    const val DEFAULT_MINIMUM_SPACING_MILLIS =
+        DEFAULT_MINIMUM_SPACING_MINUTES * MILLIS_PER_MINUTE
+    const val INACTIVITY_PAUSE_THRESHOLD_MILLIS =
+        INACTIVITY_PAUSE_THRESHOLD_MINUTES * MILLIS_PER_MINUTE
+}
+
+object SchedulerFeatureFlags {
+    const val ENABLE_PASSIVE_TELEMETRY = true
+    const val ENABLE_CONTEXT_AWARE_PAUSE = true
+    const val ENABLE_HALF_LIFE_SCHEDULER = true
+    const val ENABLE_MASTERED_RETIRED_STATES = true
+    const val ENABLE_PASSIVE_PROMPTS = true
+    const val ENABLE_LEARN_PAGE_STATS = true
+    const val ENABLE_HSK_FILTERS = true
+    const val ENABLE_ACTIVITY_RECOGNITION = false
+    const val ENABLE_DND_CONTEXT = false
+}

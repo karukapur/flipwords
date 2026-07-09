@@ -4,17 +4,42 @@
   <img src="app/src/main/res/drawable/flipwords_logo.png" alt="FlipWords logo" width="160" />
 </p>
 
-Native Android app for a Samsung Galaxy Z Flip 6 cover screen. It shows one Chinese word with pinyin and English meaning, rotating on a configurable interval that defaults to 90 minutes.
+FlipWords is an adaptive spaced-repetition learning app for passive Chinese vocabulary exposure on the Samsung Z Flip cover screen.
+
+It shows compact Traditional Chinese vocabulary cards and passive retrieval prompts, then estimates familiarity from local exposure signals such as display sessions, screen state, unlocks, full app opens, taps, and spacing across days.
+
+Honesty note: the current version estimates familiarity from passive exposure signals. It does not directly measure recall because the overlay does not require user feedback.
 
 ## What It Builds
 
-- A full app view that shows the same word in a larger top-left layout.
-- An experimental overlay mode that tries to place the word on the first cover clock screen.
-- Text-size and color controls for the experimental overlay.
-- A test-mode word frequency slider from seconds up to 90 minutes.
+- A full Learn page with current word, estimated progress cards, HSK-aware filters, and a lightweight stacked area progress chart.
+- A non-interactive experimental cover overlay for passive vocabulary exposure.
+- A context-aware adaptive scheduler that pauses during sleep-like inactivity and resumes with one appropriate word.
+- Passive exposure tracking with word states: New, Learning, Familiar, Stable, Mastered, Retired, and Hidden.
+- Passive prompt modes such as meaning and pinyin prompts, plus reveal cards.
+- Text-size, color, and auto-hide controls for the experimental overlay.
 - Offline vocabulary bundled in Kotlin with 500 beginner/intermediate Traditional Chinese words and phrases.
 - An opt-in AI Lab that can download a LiteRT-LM model and generate local vocabulary packs.
-- WorkManager scheduling for background word-state refreshes.
+
+## Learning Model
+
+FlipWords no longer presents learning as a fixed-frequency word rotator. The internal scheduler still uses a 90-minute default minimum spacing target, but words change only when the phone context suggests a reasonable exposure opportunity.
+
+The scheduler uses:
+
+- Context-aware scheduling from screen/user-present/app-open signals.
+- Passive exposure-based familiarity, not measured recall.
+- Effective exposure scoring with caps so long inactive sessions do not dominate.
+- An estimated half-life model inspired by spaced-repetition research.
+- Review/new word balancing so overdue words and new words both appear.
+- Rare maintenance resurfacing for mastered or retired words.
+
+See:
+
+- `docs/SCHEDULER.md`
+- `docs/ACTIVITY_BASED_LEARNING.md`
+- `docs/LEARN_PAGE_STATS.md`
+- `docs/CONFIG.md`
 
 ## App Icon
 
@@ -26,7 +51,7 @@ If you want to provide your own logo, the easiest handoff is a square PNG:
 - Format: PNG, transparent background if you want the icon shape handled by Android
 - Place it at: `app/src/main/res/drawable/flipwords_logo.png`
 
-The manifest already points `android:icon` and `android:roundIcon` at `@drawable/flipwords_logo`. For a production-quality Android launcher icon, use Android Studio's Image Asset tool from that 1024 px source so it generates the proper adaptive icon densities.
+The manifest already points `android:icon` and `android:roundIcon` at `@drawable/flipwords_logo`.
 
 ## Local Setup
 
@@ -67,13 +92,13 @@ Samsung may keep third-party widgets on the swipeable Flex Window widget page in
 4. Close the phone and wake the cover screen.
 5. Check whether the word appears at the top-left of the cover clock screen.
 
-The app prefers cover display id `1` when available, then tries any other non-main display. It never falls back to the main inner display, so opening the phone should not show the floating overlay on the big screen. The debug text in the app shows which displays Android reports and whether the overlay is attached, waiting, or blocked.
+The app prefers cover display id `1` when available, then tries any other non-main display. It never falls back to the main inner display, so opening the phone should not show the floating overlay on the big screen.
 
-The experimental overlay attaches to the whole cover display. Samsung does not expose the active cover page to normal Android overlay apps, so the overlay cannot currently know whether you are on the first clock page or a swiped widget page.
+The overlay uses a transparent background. Use the Hanzi, pinyin, and English sliders and color swatches in the app to adjust text sizes and colors. Auto-hide is enabled by default so the floating text disappears after a short visible window; the foreground notification still shows the current word as a fallback.
 
-The overlay uses a transparent background. Use the Hanzi, pinyin, and English sliders and color swatches in the app to adjust its text sizes and colors. Auto-hide is enabled by default so the floating text disappears after a short visible window; the Word timing card lets you turn that off or choose a 3-60 second duration. If Samsung blocks overlays on the cover clock screen, or after auto-hide removes the floating text, the foreground notification still shows the current word as a fallback.
+## Privacy
 
-Use the word timing slider to test fast rotations. The foreground overlay service refreshes around the next configured rotation time, so short intervals such as `5s` are useful while testing. Android's background WorkManager scheduler has a minimum periodic interval of about 15 minutes, so very short intervals are only reliable while the overlay service is running.
+FlipWords processes learning-state and phone-state signals locally. The scheduler uses these signals to avoid counting fake exposure during inactive periods.
 
 ## Experimental AI Lab
 
@@ -84,8 +109,4 @@ FlipWords includes an opt-in local AI Lab for personal testing. It keeps the bui
 - Dependency: `com.google.ai.edge.litertlm:litertlm-android:0.13.1`
 - Download behavior: on demand only; the model is not bundled in the APK.
 
-Inside the app, use `AI Lab` to download the model, track download progress, choose a pack size, run generation manually, choose the active source mode, and set the exact daily generation time. Exact daily generation needs Android's Alarms & reminders permission; if that permission is blocked, manual generation still works.
-
-Generated packs are saved only after validation accepts the selected number of entries. The validator rejects empty fields, overlong cover-screen text, duplicates, sentence punctuation, pinyin without tone marks, and known Simplified-only characters. If download or generation fails, FlipWords continues using the built-in list.
-
-If AI generation fails, FlipWords records a pending diagnostic log. The next time the app is open, it asks whether to save a `.txt` debug log. Saved logs are written under the app's external documents folder in `FlipWordsLogs`, and the app shows the exact file path in a Toast.
+Generated packs are saved only after validation accepts the selected number of entries. If download or generation fails, FlipWords continues using the built-in list.
