@@ -54,6 +54,7 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
@@ -63,6 +64,7 @@ class MainActivity : Activity() {
     private lateinit var overlayPreferences: OverlayPreferences
     private lateinit var schedulerPreferences: SchedulerPreferences
     private lateinit var aiLabPreferences: AiLabPreferences
+    private lateinit var generatedVocabularyStore: GeneratedVocabularyStore
     private lateinit var aiModelManager: AiModelManager
     private lateinit var hanziView: TextView
     private lateinit var pinyinView: TextView
@@ -94,8 +96,8 @@ class MainActivity : Activity() {
     private lateinit var permissionStatusView: TextView
     private lateinit var rotationStatusView: TextView
     private lateinit var displayStatusView: TextView
+    private lateinit var aiModelNameView: TextView
     private lateinit var aiModelStatusView: TextView
-    private lateinit var aiModelWarningView: TextView
     private lateinit var aiGeneratedStatusView: TextView
     private lateinit var aiScheduleStatusView: TextView
     private lateinit var aiSourceStatusView: TextView
@@ -115,8 +117,6 @@ class MainActivity : Activity() {
     private lateinit var aiSourceMixButton: TextView
     private lateinit var aiHskButton: TextView
     private lateinit var aiGenerationCountButton: TextView
-    private lateinit var aiModelPillView: TextView
-    private lateinit var aiPackPillView: TextView
     private lateinit var learnSection: LinearLayout
     private lateinit var styleSection: LinearLayout
     private lateinit var schedulerSection: LinearLayout
@@ -131,7 +131,6 @@ class MainActivity : Activity() {
     private var aiFailurePromptShowing = false
     private var lastRenderedHanzi: String? = null
     private var lastRenderedModelReady: Boolean? = null
-    private var lastRenderedGeneratedCount: Int? = null
 
     private val downloadProgressRunnable = object : Runnable {
         override fun run() {
@@ -147,6 +146,7 @@ class MainActivity : Activity() {
         overlayPreferences = OverlayPreferences(this)
         schedulerPreferences = SchedulerPreferences(this)
         aiLabPreferences = AiLabPreferences(this)
+        generatedVocabularyStore = GeneratedVocabularyStore(this)
         aiModelManager = AiModelManager(this)
         repository.recordFullAppOpen()
         WordUpdateScheduler.schedule(this)
@@ -209,11 +209,10 @@ class MainActivity : Activity() {
         }
         schedulerSection = sectionContainer().apply {
             addView(buildAdaptiveSchedulerCard(), textLayoutParams())
+            addView(buildSchedulerNote(), textLayoutParams(topMargin = 10))
         }
         aiLabSection = sectionContainer().apply {
-            addView(buildAiLabHeroCard(), textLayoutParams())
-            addView(buildAiModelCard(), textLayoutParams(topMargin = 16))
-            addView(buildAiGenerationCard(), textLayoutParams(topMargin = 16))
+            addView(buildAiWorkspaceCard(), textLayoutParams())
             addView(buildAiSourceCard(), textLayoutParams(topMargin = 16))
             addView(buildAiAutomationCard(), textLayoutParams(topMargin = 16))
         }
@@ -260,10 +259,11 @@ class MainActivity : Activity() {
     private fun buildHeroCard(): LinearLayout {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = roundedGradientBackground(
-                startColor = PREVIEW_BACKGROUND,
-                endColor = APP_LEARN_HERO_DEEP,
-                radius = 32,
+            background = ShimmerCardDrawable(
+                startColor = APP_HERO_BACKGROUND,
+                endColor = APP_HERO_DEEP,
+                shimmerColor = PREVIEW_SHIMMER,
+                radiusPx = dp(32).toFloat(),
             )
             applySoftElevation(this, AI_HERO_ELEVATION_DP)
             setPadding(dp(24), dp(22), dp(24), dp(24))
@@ -274,13 +274,28 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         titleRow.addView(
-            TextView(this).apply {
-                text = "Current word"
-                setTextColor(APP_AI_HERO_TEXT)
-                textSize = 14f
-                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
-                includeFontPadding = false
-                setButtonIcon(this, R.drawable.ic_learn, APP_AMBER)
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(
+                    ImageView(this@MainActivity).apply {
+                        setImageResource(R.drawable.ic_learn)
+                        imageTintList = ColorStateList.valueOf(APP_AMBER)
+                        contentDescription = null
+                    },
+                    LinearLayout.LayoutParams(dp(22), dp(22)),
+                )
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = "Current word"
+                        setTextColor(APP_AI_HERO_TEXT)
+                        textSize = 14f
+                        typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                        includeFontPadding = false
+                        setPadding(dp(8), 0, 0, 0)
+                    },
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+                )
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
@@ -403,24 +418,15 @@ class MainActivity : Activity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = ShimmerCardDrawable(
-                startColor = PREVIEW_BACKGROUND,
-                endColor = APP_PREVIEW_DEEP,
+                startColor = APP_HERO_BACKGROUND,
+                endColor = APP_HERO_DEEP,
                 shimmerColor = PREVIEW_SHIMMER,
                 radiusPx = dp(28).toFloat(),
             )
             applySoftElevation(this, CARD_ELEVATION_DP)
             setPadding(dp(22), dp(22), dp(22), dp(24))
         }
-        card.addView(
-            TextView(this).apply {
-                text = "Cover preview"
-                setTextColor(APP_INVERSE_TEXT)
-                textSize = 17f
-                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
-                includeFontPadding = false
-                setButtonIcon(this, R.drawable.ic_device, APP_AMBER)
-            },
-        )
+        card.addView(darkHeroTitleRow("Cover preview", R.drawable.ic_device))
 
         previewHanziView = TextView(this).apply {
             includeFontPadding = false
@@ -483,12 +489,33 @@ class MainActivity : Activity() {
     }
 
     private fun buildAdaptiveSchedulerCard(): LinearLayout {
-        val card = appCard()
-        card.addView(appSectionHeader("Adaptive scheduler", "Context-aware learning", R.drawable.ic_clock))
+        val card = shimmerHeroCard()
+        card.addView(darkHeroHeader("Adaptive scheduler", "Context-aware learning", R.drawable.ic_clock))
         addAdaptiveSchedulerInfo(card)
         addAutoHideControl(card)
         return card
     }
+
+    private fun buildSchedulerNote(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), 0, dp(8), 0)
+            intervalStatusView = infoTextView().apply {
+                textSize = 13f
+                setTextColor(APP_TEXT_SECONDARY)
+                setLineSpacing(dp(2).toFloat(), 1f)
+            }
+            addView(intervalStatusView)
+            addView(
+                infoTextView().apply {
+                    textSize = 13f
+                    setTextColor(APP_TEXT_SECONDARY)
+                    setLineSpacing(dp(2).toFloat(), 1f)
+                    text = "Notes\n  - Words update after useful exposure, not just elapsed time.\n  - The scheduler weighs valid display time, unlocks, app opens, days seen, and taps to estimate when a word should return."
+                },
+                textLayoutParams(topMargin = 8),
+            )
+        }
 
     private fun buildStatsCard(): LinearLayout {
         val card = appCard().apply {
@@ -548,75 +575,56 @@ class MainActivity : Activity() {
         return card
     }
 
-    private fun buildAiLabHeroCard(): LinearLayout {
-        return LinearLayout(this).apply {
+    private fun buildAiWorkspaceCard(): LinearLayout {
+        val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(8), 0, 0)
-            aiPackPillView = statusPill().apply {
-                visibility = View.GONE
-            }
-            addView(
-                TextView(this@MainActivity).apply {
-                    text = "Optional local vocabulary generation."
-                    setTextColor(APP_TEXT_SECONDARY)
-                    textSize = 19f
-                    typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
-                    includeFontPadding = false
-                },
-                textLayoutParams(),
+            background = ShimmerCardDrawable(
+                startColor = APP_HERO_BACKGROUND,
+                endColor = APP_HERO_DEEP,
+                shimmerColor = PREVIEW_SHIMMER,
+                radiusPx = dp(28).toFloat(),
             )
-            aiModelWarningView = TextView(this@MainActivity).apply {
-                setTextColor(APP_ON_ERROR_CONTAINER)
-                textSize = 16f
-                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
-                includeFontPadding = true
-                minHeight = dp(86)
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(18), dp(12), dp(18), dp(12))
-                background = roundedStrokeBackground(AI_WARNING_SURFACE, radius = 18, strokeColor = APP_ERROR_CONTAINER)
-                setButtonIcon(this, R.drawable.ic_warning, APP_ON_ERROR_CONTAINER)
-            }
-            addView(aiModelWarningView, textLayoutParams(topMargin = 34))
+            applySoftElevation(this, AI_HERO_ELEVATION_DP)
+            setPadding(dp(24), dp(28), dp(24), dp(24))
         }
-    }
-
-    private fun buildAiModelCard(): LinearLayout {
-        val card = aiCard().apply {
-            setPadding(dp(24), dp(24), dp(24), dp(24))
-        }
-        aiModelPillView = TextView(this).apply {
-            text = "GEMMA-4-E2B-IT.LITERTLM"
-            setTextColor(APP_PRIMARY)
-            textSize = 12f
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            includeFontPadding = false
-            gravity = Gravity.CENTER_VERTICAL
-            minHeight = dp(34)
-            background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 8, strokeColor = APP_AI_SUBTLE_STROKE)
-            setPadding(dp(12), 0, dp(12), 0)
-            setButtonIcon(this, R.drawable.ic_device, APP_PRIMARY)
-        }
-        card.addView(aiModelPillView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        aiModelStatusView = TextView(this).apply {
-            text = "Large local model required for autonomous on-device curriculum generation."
-            setTextColor(APP_TEXT_SECONDARY)
-            textSize = 17f
+        card.addView(darkHeroTitleRow("AI Workspace", R.drawable.ic_sparkle))
+        aiModelNameView = TextView(this).apply {
+            text = "Gemma"
+            setTextColor(APP_AI_HERO_TEXT)
+            textSize = 16f
             typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
             includeFontPadding = true
             setLineSpacing(dp(2).toFloat(), 1f)
         }
-        card.addView(aiModelStatusView, textLayoutParams(topMargin = 18))
+        card.addView(aiModelNameView, textLayoutParams(topMargin = 24))
+        aiModelStatusView = TextView(this).apply {
+            setTextColor(APP_ON_PRIMARY)
+            textSize = 30f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            includeFontPadding = true
+            setLineSpacing(dp(2).toFloat(), 1f)
+        }
+        card.addView(aiModelStatusView, textLayoutParams(topMargin = 2))
+        aiGeneratedStatusView = TextView(this).apply {
+            setTextColor(APP_AI_HERO_TEXT)
+            textSize = 16f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            includeFontPadding = true
+            setLineSpacing(dp(3).toFloat(), 1f)
+        }
+        card.addView(aiGeneratedStatusView, textLayoutParams(topMargin = 8))
+
         aiDownloadProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progress = 0
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 progressTintList = ColorStateList.valueOf(APP_AMBER)
-                progressBackgroundTintList = ColorStateList.valueOf(APP_SURFACE_CONTAINER_HIGH)
+                progressBackgroundTintList = ColorStateList.valueOf(APP_WORKSPACE_PANEL_STROKE)
             }
             minimumHeight = dp(8)
         }
         aiDownloadProgressView = TextView(this).apply {
-            setTextColor(APP_TEXT_SECONDARY)
+            setTextColor(APP_AI_HERO_TEXT)
             textSize = 13f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             includeFontPadding = false
@@ -624,7 +632,8 @@ class MainActivity : Activity() {
         }
         aiDownloadPanelView = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                background = roundedBackground(APP_MUTED_SURFACE, radius = 14)
+                visibility = View.GONE
+                background = roundedStrokeBackground(APP_WORKSPACE_PANEL, radius = 16, strokeColor = APP_WORKSPACE_PANEL_STROKE)
                 setPadding(dp(16), dp(14), dp(16), dp(14))
                 addView(
                     LinearLayout(this@MainActivity).apply {
@@ -633,11 +642,11 @@ class MainActivity : Activity() {
                         addView(
                             TextView(this@MainActivity).apply {
                                 text = "Downloading..."
-                                setTextColor(APP_PRIMARY)
+                                setTextColor(APP_ON_PRIMARY)
                                 textSize = 15f
                                 typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
                                 includeFontPadding = false
-                                setButtonIcon(this, R.drawable.ic_download, APP_PRIMARY)
+                                setButtonIcon(this, R.drawable.ic_download, APP_AMBER)
                             },
                             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
                         )
@@ -647,65 +656,24 @@ class MainActivity : Activity() {
                 )
                 addView(aiDownloadProgressBar, textLayoutParams(topMargin = 14))
             }
-        card.addView(
-            aiDownloadPanelView,
-            textLayoutParams(topMargin = 28),
-        )
-        aiModelActionButton = actionButton("Download model", primary = false, iconRes = R.drawable.ic_download).apply {
-            setOnClickListener {
-                performActionHaptic()
-                handleModelAction()
-            }
-        }
-        card.addView(aiModelActionButton, textLayoutParams(topMargin = 26))
-        return card
-    }
+        card.addView(aiDownloadPanelView, textLayoutParams(topMargin = 22))
 
-    private fun buildAiGenerationCard(): LinearLayout {
-        val card = aiCard().apply {
-            setPadding(dp(24), dp(28), dp(24), dp(24))
-        }
-        card.addView(
-            TextView(this).apply {
-                text = "Generation Output"
-                setTextColor(APP_TEXT_PRIMARY)
-                textSize = 24f
-                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
-                includeFontPadding = false
-                gravity = Gravity.CENTER_HORIZONTAL
-            },
-        )
-        aiGeneratedStatusView = TextView(this).apply {
-            setTextColor(APP_TEXT_SECONDARY)
-            textSize = 16f
-            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
-            includeFontPadding = true
-            gravity = Gravity.CENTER_HORIZONTAL
-        }
-        card.addView(aiGeneratedStatusView, textLayoutParams(topMargin = 14))
-        card.addView(
-            LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.START
-                addView(buildFeaturePill("Tone-marked pinyin"), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(54)))
-                addView(buildFeaturePill("Traditional Hanzi"), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(54)).apply {
-                    topMargin = dp(10)
-                })
-                addView(buildFeaturePill("Semantic context"), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(54)).apply {
-                    topMargin = dp(10)
-                })
-            },
-            textLayoutParams(topMargin = 24),
-        )
         aiGenerationProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
+            visibility = View.GONE
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 indeterminateTintList = ColorStateList.valueOf(APP_AMBER)
-                progressBackgroundTintList = ColorStateList.valueOf(APP_SURFACE_CONTAINER_HIGH)
+                progressBackgroundTintList = ColorStateList.valueOf(APP_WORKSPACE_PANEL_STROKE)
             }
             minimumHeight = dp(8)
         }
-        aiGenerationStatusView = infoTextView()
+        aiGenerationStatusView = TextView(this).apply {
+            setTextColor(APP_AI_HERO_TEXT)
+            textSize = 14f
+            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            includeFontPadding = true
+            visibility = View.GONE
+        }
         aiGenerationCountButton = selectorButton(
             "Words",
             aiLabPreferences.generationTargetCount.toString(),
@@ -726,9 +694,19 @@ class MainActivity : Activity() {
         aiHskButton.visibility = View.GONE
         card.addView(aiGenerationCountButton)
         card.addView(aiHskButton)
-        card.addView(aiGenerationProgressBar, textLayoutParams(topMargin = 14))
-        card.addView(aiGenerationStatusView, textLayoutParams(topMargin = 6))
+        card.addView(aiGenerationProgressBar, textLayoutParams(topMargin = 22))
+        card.addView(aiGenerationStatusView, textLayoutParams(topMargin = 8))
+
+        aiModelActionButton = actionButton("Download model", primary = false, iconRes = R.drawable.ic_download).apply {
+            setOnClickListener {
+                performActionHaptic()
+                handleModelAction()
+            }
+        }
+        card.addView(aiModelActionButton, textLayoutParams(topMargin = 26))
+
         aiGenerateButton = actionButton("Generate now", primary = true, iconRes = R.drawable.ic_sparkle).apply {
+            visibility = View.GONE
             setOnClickListener {
                 performActionHaptic()
                 maybeRequestNotificationPermission()
@@ -737,15 +715,15 @@ class MainActivity : Activity() {
                 render()
             }
         }
-        card.addView(aiGenerateButton, textLayoutParams(topMargin = 28))
+        card.addView(aiGenerateButton, textLayoutParams(topMargin = 12))
         aiGenerateRequirementView = TextView(this).apply {
                 text = "Requires model download completion"
-                setTextColor(APP_TEXT_SECONDARY)
+                setTextColor(APP_AI_HERO_TEXT)
                 textSize = 12f
                 typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
                 gravity = Gravity.CENTER
                 includeFontPadding = false
-                setButtonIcon(this, R.drawable.ic_status_dot, APP_TEXT_SECONDARY)
+                setButtonIcon(this, R.drawable.ic_status_dot, APP_AMBER)
             }
         card.addView(
             aiGenerateRequirementView,
@@ -873,8 +851,8 @@ class MainActivity : Activity() {
     }
 
     private fun buildStatusCard(): LinearLayout {
-        val card = appCard()
-        card.addView(appSectionHeader("Device status", "Cover display", R.drawable.ic_device))
+        val card = shimmerHeroCard()
+        card.addView(darkHeroHeader("Device status", "Cover display", R.drawable.ic_device))
         permissionStatusView = infoTextView()
         rotationStatusView = infoTextView()
         displayStatusView = infoTextView()
@@ -1014,57 +992,34 @@ class MainActivity : Activity() {
         val modelStatus = aiModelManager.refreshStatus()
         val downloadProgress = aiModelManager.downloadProgress()
         val generating = isAiGenerating()
+        val preserveGeneratedStatus = generating ||
+            aiLabPreferences.generatedStatus.startsWith(AiLabPreferences.GENERATED_FAILED)
+        val generatedMetadata = generatedVocabularyStore.syncMetadata(preserveStatus = preserveGeneratedStatus)
         val modelReady = modelStatus == AiLabPreferences.MODEL_READY
         val modelFailed = modelStatus == AiLabPreferences.MODEL_FAILED
         val generatedFailed = aiLabPreferences.generatedStatus.startsWith(AiLabPreferences.GENERATED_FAILED)
-        val hasGeneratedPack = aiLabPreferences.generatedCount > 0
+        val hasGeneratedPack = generatedMetadata.hasEntries
         val targetCount = aiLabPreferences.generationTargetCount
 
-        aiModelWarningView.text = when {
-            downloadProgress.isDownloading -> "Model downloading\nBuilt-in vocabulary remains available offline."
-            modelReady -> "Model ready\nLocal AI generation is available on this device."
-            modelFailed -> "Model download failed\nBuilt-in vocabulary remains available offline."
-            else -> "Model not downloaded\nBuilt-in vocabulary remains available offline."
+        aiModelStatusView.text = when {
+            generating -> "Generation running"
+            downloadProgress.isDownloading -> "Downloading"
+            generatedFailed -> "Generation failed"
+            modelReady -> "Ready for Generation"
+            else -> "Model needed"
         }
-        aiModelWarningView.setTextColor(if (modelReady) APP_PRIMARY else APP_ON_ERROR_CONTAINER)
-        aiModelWarningView.background = roundedStrokeBackground(
-            color = if (modelReady) APP_SUCCESS_SURFACE else AI_WARNING_SURFACE,
-            radius = 18,
-            strokeColor = if (modelReady) APP_SUCCESS_SURFACE else APP_ERROR_CONTAINER,
-        )
-        setButtonIcon(aiModelWarningView, if (modelReady) R.drawable.ic_check else R.drawable.ic_warning, if (modelReady) APP_PRIMARY else APP_ON_ERROR_CONTAINER)
-        aiModelPillView.text = "GEMMA-4-E2B-IT.LITERTLM"
-        aiModelPillView.setTextColor(APP_PRIMARY)
-        aiModelPillView.background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 8, strokeColor = APP_AI_SUBTLE_STROKE)
-        setButtonIcon(aiModelPillView, R.drawable.ic_device, APP_PRIMARY)
-        configureStatusPill(
-            pill = aiPackPillView,
-            text = when {
-                generating -> "Generating"
-                hasGeneratedPack -> "${aiLabPreferences.generatedCount} entries"
-                else -> "Built-in list"
-            },
-            iconRes = when {
+        val workspaceStatusColor = if (generatedFailed || modelFailed) APP_ERROR_CONTAINER else APP_ON_PRIMARY
+        aiModelStatusView.setTextColor(workspaceStatusColor)
+        setButtonIcon(
+            aiModelStatusView,
+            when {
+                generatedFailed || modelFailed -> R.drawable.ic_warning
                 generating -> R.drawable.ic_sparkle
-                hasGeneratedPack -> R.drawable.ic_check
-                else -> R.drawable.ic_learn
+                downloadProgress.isDownloading -> R.drawable.ic_download
+                modelReady -> R.drawable.ic_check
+                else -> R.drawable.ic_device
             },
-            iconTint = when {
-                generating -> APP_AMBER
-                hasGeneratedPack -> APP_SUCCESS
-                else -> APP_SECONDARY_TEXT
-            },
-            backgroundColor = when {
-                generating -> APP_AMBER_SURFACE
-                hasGeneratedPack -> APP_SUCCESS_SURFACE
-                else -> APP_MUTED_SURFACE
-            },
-        )
-        configureInfoLine(
-            view = aiModelStatusView,
-            text = "Large local model required for autonomous on-device curriculum generation.",
-            iconRes = null,
-            iconTint = APP_SECONDARY_TEXT,
+            if (generatedFailed || modelFailed) APP_ERROR_CONTAINER else APP_AMBER,
         )
         aiDownloadProgressBar.progress = downloadProgress.percent
         aiDownloadProgressView.text =
@@ -1072,22 +1027,18 @@ class MainActivity : Activity() {
         setVisibleAnimated(aiDownloadPanelView, downloadProgress.isDownloading, slide = true)
         setVisibleAnimated(aiGenerationProgressBar, generating, slide = true)
         setVisibleAnimated(aiGenerationStatusView, generating, slide = true)
-        configureInfoLine(
-            view = aiGenerationStatusView,
-            text = "Building vocabulary${animatedDots()} ${generationStepLabel(aiLabPreferences.generatedStatus)}",
-            iconRes = R.drawable.ic_sparkle,
-            iconTint = APP_AMBER,
-        )
-        configureInfoLine(
-            view = aiGeneratedStatusView,
-            text = when {
-                generatedFailed -> "Creates exactly $targetCount valid Traditional Chinese entries per synthesis cycle. Last generation failed."
-                hasGeneratedPack -> "Creates exactly $targetCount valid Traditional Chinese entries per synthesis cycle. Last updated ${formatOptionalTime(aiLabPreferences.lastGenerationMillis)}."
-                else -> "Creates exactly $targetCount valid Traditional Chinese entries per synthesis cycle."
-            },
-            iconRes = null,
-            iconTint = APP_SECONDARY_TEXT,
-        )
+        aiGenerationStatusView.text = "Building vocabulary${animatedDots()} ${generationStepLabel(aiLabPreferences.generatedStatus)}"
+        aiGenerationStatusView.setTextColor(APP_AI_HERO_TEXT)
+        setButtonIcon(aiGenerationStatusView, R.drawable.ic_sparkle, APP_AMBER)
+        aiGeneratedStatusView.text = when {
+            downloadProgress.isDownloading -> "Built-in vocabulary stays available while the local model downloads."
+            generatedFailed -> "Last run did not complete. Built-in vocabulary remains active."
+            hasGeneratedPack -> "Updated ${formatGeneratedUpdateTime(generatedMetadata.lastGenerationMillis)}"
+            modelReady -> "Creates $targetCount Traditional Chinese entries per run."
+            else -> "Download the local model to create personalized Traditional Chinese vocabulary."
+        }
+        aiGeneratedStatusView.setTextColor(if (generatedFailed || modelFailed) AI_FAILURE_HEADER else APP_AI_HERO_TEXT)
+        setButtonIcon(aiGeneratedStatusView, null, APP_AI_HERO_TEXT)
         configureInfoLine(
             view = aiSourceStatusView,
             text = "Active vocabulary: ${repository.activeWords().size} words",
@@ -1101,15 +1052,15 @@ class MainActivity : Activity() {
         configureActionButton(
             button = aiModelActionButton,
             text = when {
-                downloadProgress.isDownloading -> "Pause"
-                modelReady -> "Model ready"
+                downloadProgress.isDownloading -> "Downloading..."
+                modelReady -> "Ready"
                 modelFailed -> "Retry download"
                 else -> "Download AI model"
             },
             primary = false,
-            iconRes = if (downloadProgress.isDownloading) R.drawable.ic_stop else R.drawable.ic_download,
-            backgroundColor = APP_SURFACE_CONTAINER_HIGH,
-            textColor = APP_TEXT_PRIMARY,
+            iconRes = if (downloadProgress.isDownloading) R.drawable.ic_download else R.drawable.ic_download,
+            backgroundColor = if (modelFailed) APP_ERROR_CONTAINER else APP_AMBER_SURFACE,
+            textColor = if (modelFailed) APP_ON_ERROR_CONTAINER else APP_PRIMARY,
         )
         val showModelAction = !modelReady || downloadProgress.isDownloading
         setVisibleAnimated(aiModelActionButton, showModelAction, slide = true)
@@ -1130,18 +1081,22 @@ class MainActivity : Activity() {
             backgroundColor = if (modelReady) APP_PRIMARY_CONTAINER else APP_DISABLED_PRIMARY,
             textColor = APP_ON_PRIMARY,
         )
+        setVisibleAnimated(aiGenerateButton, modelReady || generating, slide = true)
         setEnabledAnimated(aiGenerateButton, modelReady && !generating)
         aiGenerateRequirementView.text = when {
             generating -> "Generation is running"
-            modelReady -> "Ready for on-device generation"
+            downloadProgress.isDownloading -> "Download in progress"
+            generatedFailed -> "Last generation failed"
+            modelReady -> "Ready for Generation"
             else -> "Requires model download completion"
         }
         setButtonIcon(
             aiGenerateRequirementView,
             if (modelReady) R.drawable.ic_check else R.drawable.ic_status_dot,
-            if (modelReady) APP_PRIMARY else APP_TEXT_SECONDARY,
+            if (modelReady) APP_AMBER else APP_AI_HERO_TEXT,
         )
-        aiGenerateRequirementView.setTextColor(if (modelReady) APP_PRIMARY else APP_TEXT_SECONDARY)
+        aiGenerateRequirementView.setTextColor(if (generatedFailed) AI_FAILURE_HEADER else APP_AI_HERO_TEXT)
+        setVisibleAnimated(aiGenerateRequirementView, !modelReady || generating || generatedFailed, slide = true)
         configureActionButton(
             button = aiTimeButton,
             text = formatGenerationTime(),
@@ -1180,9 +1135,7 @@ class MainActivity : Activity() {
             textColor = APP_ON_PRIMARY,
         )
         setVisibleAnimated(aiDeleteModelButton, modelReady, slide = true)
-        setSubtlePulse(aiModelPillView, downloadProgress.isDownloading)
-        setSubtlePulse(aiPackPillView, generating)
-        maybePlayAiStatusSuccess(modelReady, aiLabPreferences.generatedCount)
+        maybePlayAiStatusSuccess(modelReady)
         updatingUi = false
         updateActivityLoop(downloadProgress.isDownloading || generating)
     }
@@ -1337,15 +1290,13 @@ class MainActivity : Activity() {
     }
 
     private fun addAdaptiveSchedulerInfo(root: LinearLayout) {
-        intervalStatusView = infoTextView()
-        root.addView(statusPanel(intervalStatusView, R.drawable.ic_clock), textLayoutParams(topMargin = 16))
         schedulerSpacingButton = actionButton("Minimum spacing", primary = false, iconRes = R.drawable.ic_clock).apply {
             setOnClickListener {
                 performSelectionHaptic()
                 showMinimumSpacingDialog()
             }
         }
-        root.addView(schedulerSpacingButton, textLayoutParams(topMargin = 10))
+        root.addView(schedulerSpacingButton, textLayoutParams(topMargin = 18))
         intervalChangeButton = actionButton("Restore hidden words", primary = false, iconRes = R.drawable.ic_repeat).apply {
             setOnClickListener {
                 performSelectionHaptic()
@@ -1353,7 +1304,6 @@ class MainActivity : Activity() {
             }
         }
         root.addView(intervalChangeButton, textLayoutParams(topMargin = 10))
-        updateIntervalControls()
     }
 
     private fun showLearnHskFilterDialog() {
@@ -1649,14 +1599,14 @@ class MainActivity : Activity() {
 
         val info = repository.adaptiveRotationInfo()
         intervalStatusView.text =
-            "Words change after a valid exposure opportunity. Minimum spacing target: ${
-                formatInterval(info.minimumSpacingMillis / 1000L)
-            }.\nCurrent context: ${info.phoneLearningState.readableLabel()}."
+            "Spacing ${formatInterval(info.minimumSpacingMillis / 1000L)} · ${
+                info.phoneLearningState.readableLabel()
+            }"
         if (::intervalChangeButton.isInitialized) {
             val hasHiddenWords = repository.progressById().values.any { it.status == WordStatus.HIDDEN || it.isHidden }
             configureActionButton(
                 button = schedulerSpacingButton,
-                text = "Minimum spacing: ${formatInterval(schedulerPreferences.minimumSpacingMinutes * 60L)}",
+                text = "Spacing: ${formatInterval(schedulerPreferences.minimumSpacingMinutes * 60L)}",
                 primary = false,
                 iconRes = R.drawable.ic_clock,
             )
@@ -1701,24 +1651,30 @@ class MainActivity : Activity() {
         root.addView(row, textLayoutParams(topMargin = 14))
 
         val statusRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.VERTICAL
             background = roundedBackground(APP_MUTED_SURFACE, radius = 20)
             setPadding(dp(14), dp(12), dp(14), dp(12))
             addView(
-                iconBadge(
-                    iconRes = R.drawable.ic_repeat,
-                    iconTint = APP_SECONDARY_TEXT,
-                    backgroundColor = APP_SURFACE,
-                    sizeDp = 34,
-                ),
-                LinearLayout.LayoutParams(dp(34), dp(34)),
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        iconBadge(
+                            iconRes = R.drawable.ic_repeat,
+                            iconTint = APP_SECONDARY_TEXT,
+                            backgroundColor = APP_SURFACE,
+                            sizeDp = 34,
+                        ),
+                        LinearLayout.LayoutParams(dp(34), dp(34)),
+                    )
+                    autoHideStatusView = infoTextView().apply {
+                        textSize = 13f
+                        setPadding(dp(12), 0, 0, 0)
+                    }
+                    addView(autoHideStatusView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                },
+                textLayoutParams(),
             )
-            autoHideStatusView = infoTextView().apply {
-                textSize = 13f
-                setPadding(dp(12), 0, dp(10), 0)
-            }
-            addView(autoHideStatusView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             autoHideDurationButton = TextView(this@MainActivity).apply {
                 gravity = Gravity.CENTER
                 isClickable = true
@@ -1734,7 +1690,9 @@ class MainActivity : Activity() {
                     showAutoHideOptionsDialog()
                 }
             }
-            addView(autoHideDurationButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)))
+            addView(autoHideDurationButton, textLayoutParams(topMargin = 10).apply {
+                height = dp(42)
+            })
         }
         root.addView(statusRow, textLayoutParams(topMargin = 10))
         updateAutoHideControls()
@@ -2101,6 +2059,13 @@ class MainActivity : Activity() {
             DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(millis))
         }
 
+    private fun formatGeneratedUpdateTime(millis: Long): String =
+        if (millis <= 0L) {
+            "not set"
+        } else {
+            SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(Date(millis))
+        }
+
     private fun updateActivityLoop(shouldRefresh: Boolean) {
         handler.removeCallbacks(downloadProgressRunnable)
         if (shouldRefresh) {
@@ -2437,6 +2402,84 @@ class MainActivity : Activity() {
             setPadding(dp(20), dp(20), dp(20), dp(20))
         }
 
+    private fun shimmerHeroCard(radius: Int = 28): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = ShimmerCardDrawable(
+                startColor = APP_HERO_BACKGROUND,
+                endColor = APP_HERO_DEEP,
+                shimmerColor = PREVIEW_SHIMMER,
+                radiusPx = dp(radius).toFloat(),
+            )
+            applySoftElevation(this, AI_HERO_ELEVATION_DP)
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+        }
+
+    private fun darkHeroTitleRow(title: String, iconRes: Int): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                ImageView(this@MainActivity).apply {
+                    setImageResource(iconRes)
+                    imageTintList = ColorStateList.valueOf(APP_AMBER)
+                    contentDescription = null
+                },
+                LinearLayout.LayoutParams(dp(28), dp(28)),
+            )
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = title
+                    setTextColor(APP_ON_PRIMARY)
+                    textSize = 24f
+                    typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                    includeFontPadding = false
+                    setPadding(dp(12), 0, 0, 0)
+                },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+            )
+        }
+
+    private fun darkHeroHeader(title: String, subtitle: String, iconRes: Int): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                ImageView(this@MainActivity).apply {
+                    setImageResource(iconRes)
+                    imageTintList = ColorStateList.valueOf(APP_AMBER)
+                    contentDescription = null
+                },
+                LinearLayout.LayoutParams(dp(34), dp(34)),
+            )
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(14), 0, 0, 0)
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = title
+                            setTextColor(APP_ON_PRIMARY)
+                            textSize = 24f
+                            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                            includeFontPadding = false
+                        },
+                    )
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = subtitle
+                            setTextColor(APP_AI_HERO_TEXT)
+                            textSize = 13f
+                            typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
+                            includeFontPadding = true
+                            setPadding(0, dp(5), 0, 0)
+                        },
+                    )
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+        }
+
     private fun appSectionHeader(title: String, subtitle: String, iconRes: Int): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -2529,8 +2572,9 @@ class MainActivity : Activity() {
     private fun statusPanel(textView: TextView, iconRes: Int): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.TOP
+            gravity = Gravity.CENTER_VERTICAL
             background = roundedBackground(APP_MUTED_SURFACE, radius = 20)
+            minimumHeight = dp(72)
             setPadding(dp(14), dp(12), dp(14), dp(12))
             addView(
                 iconBadge(
@@ -2542,6 +2586,7 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams(dp(36), dp(36)),
             )
             textView.setPadding(dp(12), 0, 0, 0)
+            textView.gravity = Gravity.CENTER_VERTICAL
             addView(textView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
 
@@ -2718,18 +2763,6 @@ class MainActivity : Activity() {
             minHeight = dp(62)
             background = roundedStrokeBackground(APP_MUTED_SURFACE, radius = 14, strokeColor = APP_AI_SUBTLE_STROKE)
             setPadding(dp(8), dp(8), dp(8), dp(8))
-        }
-
-    private fun statusPill(): TextView =
-        TextView(this).apply {
-            gravity = Gravity.CENTER
-            setTextColor(APP_PRIMARY)
-            textSize = 12f
-            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
-            includeFontPadding = false
-            minHeight = dp(38)
-            background = roundedBackground(APP_SUCCESS_SURFACE, radius = 19)
-            setPadding(dp(8), 0, dp(8), 0)
         }
 
     private fun buildFeaturePill(text: String): TextView =
@@ -3028,20 +3061,13 @@ class MainActivity : Activity() {
             .start()
     }
 
-    private fun maybePlayAiStatusSuccess(modelReady: Boolean, generatedCount: Int) {
+    private fun maybePlayAiStatusSuccess(modelReady: Boolean) {
         val previousModelReady = lastRenderedModelReady
         if (previousModelReady == false && modelReady) {
             performConfirmHaptic()
-            playSuccessPulse(aiModelPillView)
+            playSuccessPulse(aiModelStatusView)
         }
         lastRenderedModelReady = modelReady
-
-        val previousGeneratedCount = lastRenderedGeneratedCount
-        if (previousGeneratedCount != null && previousGeneratedCount <= 0 && generatedCount > 0) {
-            performConfirmHaptic()
-            playSuccessPulse(aiPackPillView)
-        }
-        lastRenderedGeneratedCount = generatedCount
     }
 
     private fun performSelectionHaptic() {
@@ -3294,13 +3320,17 @@ class MainActivity : Activity() {
         private val endColor: Int,
         private val shimmerColor: Int,
         private val radiusPx: Float,
+        private val sweepDurationMillis: Long = 6_400L,
+        private val restDurationMillis: Long = 2_400L,
     ) : Drawable() {
         private val rect = RectF()
+        private val beamRect = RectF()
+        private val clipPath = Path()
         private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val shimmerPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private var progress = 0f
         private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 3_200L
+            duration = sweepDurationMillis + restDurationMillis
             repeatCount = ValueAnimator.INFINITE
             repeatMode = ValueAnimator.RESTART
             addUpdateListener {
@@ -3325,19 +3355,75 @@ class MainActivity : Activity() {
             )
             canvas.drawRoundRect(rect, radiusPx, radiusPx, basePaint)
 
+            val sweepFraction = sweepDurationMillis.toFloat() / (sweepDurationMillis + restDurationMillis).toFloat()
+            if (progress >= sweepFraction) {
+                shimmerPaint.shader = null
+                return
+            }
+
             val width = rect.width()
-            val shimmerCenter = rect.left - width * 0.45f + width * 1.9f * progress
+            val height = rect.height()
+            val linearSweepProgress = progress / sweepFraction
+            val sweepProgress = easeOutCubic(linearSweepProgress)
+            val fade = edgeFade(linearSweepProgress)
+            val beamWidth = width * 0.34f
+            val travelStart = rect.left - height - beamWidth
+            val travelEnd = rect.right + height + beamWidth
+            val shimmerCenter = travelStart + (travelEnd - travelStart) * sweepProgress
+
             shimmerPaint.shader = LinearGradient(
-                shimmerCenter - width * 0.24f,
-                rect.top,
-                shimmerCenter + width * 0.24f,
-                rect.bottom,
-                intArrayOf(Color.TRANSPARENT, shimmerColor, Color.TRANSPARENT),
-                floatArrayOf(0f, 0.5f, 1f),
+                shimmerCenter - beamWidth,
+                0f,
+                shimmerCenter + beamWidth,
+                0f,
+                intArrayOf(
+                    shimmerColorWithAlpha(0f),
+                    shimmerColorWithAlpha(0.35f * fade),
+                    shimmerColorWithAlpha(fade),
+                    shimmerColorWithAlpha(0.35f * fade),
+                    shimmerColorWithAlpha(0f),
+                ),
+                floatArrayOf(0f, 0.32f, 0.5f, 0.68f, 1f),
                 Shader.TileMode.CLAMP,
             )
-            canvas.drawRoundRect(rect, radiusPx, radiusPx, shimmerPaint)
+            beamRect.set(
+                shimmerCenter - beamWidth,
+                rect.top - height * 1.8f,
+                shimmerCenter + beamWidth,
+                rect.bottom + height * 1.8f,
+            )
+            clipPath.reset()
+            clipPath.addRoundRect(rect, radiusPx, radiusPx, Path.Direction.CW)
+            val saveCount = canvas.save()
+            canvas.clipPath(clipPath)
+            canvas.rotate(-18f, rect.centerX(), rect.centerY())
+            canvas.drawRect(beamRect, shimmerPaint)
+            canvas.restoreToCount(saveCount)
         }
+
+        private fun edgeFade(value: Float): Float {
+            val fadeInWindow = 0.12f
+            val fadeOutWindow = 0.36f
+            val raw = when {
+                value < fadeInWindow -> value / fadeInWindow
+                value > 1f - fadeOutWindow -> (1f - value) / fadeOutWindow
+                else -> 1f
+            }.coerceIn(0f, 1f)
+            return raw * raw * (3f - 2f * raw)
+        }
+
+        private fun easeOutCubic(value: Float): Float {
+            val inverse = 1f - value.coerceIn(0f, 1f)
+            return 1f - inverse * inverse * inverse
+        }
+
+        private fun shimmerColorWithAlpha(alphaFactor: Float): Int =
+            Color.argb(
+                (Color.alpha(shimmerColor) * alphaFactor).toInt().coerceIn(0, 255),
+                Color.red(shimmerColor),
+                Color.green(shimmerColor),
+                Color.blue(shimmerColor),
+            )
 
         override fun setAlpha(alpha: Int) {
             basePaint.alpha = alpha
@@ -3423,15 +3509,16 @@ class MainActivity : Activity() {
 
         private const val SANS_FAMILY = "sans-serif"
         private const val SERIF_FAMILY = "serif"
-        private const val MODEL_DISPLAY_NAME = "Gemma 4 E2B"
 
         private val APP_BACKGROUND = Color.parseColor("#F7FAF7")
         private val APP_SURFACE = Color.parseColor("#FFFFFF")
         private val APP_MUTED_SURFACE = Color.parseColor("#F1F4F1")
         private val APP_SURFACE_CONTAINER_HIGH = Color.parseColor("#E5E9E6")
-        private val PREVIEW_BACKGROUND = Color.parseColor("#2D3130")
+        private val APP_HERO_BACKGROUND = Color.parseColor("#2D3130")
+        private val APP_HERO_DEEP = Color.parseColor("#012A24")
+        private val PREVIEW_BACKGROUND = APP_HERO_BACKGROUND
         private val APP_PREVIEW_DEEP = Color.parseColor("#141918")
-        private val PREVIEW_SHIMMER = Color.parseColor("#26FFFFFF")
+        private val PREVIEW_SHIMMER = Color.parseColor("#13FFFFFF")
         private val APP_TEXT_PRIMARY = Color.parseColor("#181C1B")
         private val APP_TEXT_SECONDARY = Color.parseColor("#3E4945")
         private val APP_INVERSE_TEXT = Color.parseColor("#EEF2EE")
@@ -3443,6 +3530,8 @@ class MainActivity : Activity() {
         private val APP_AI_HERO_DEEP = Color.parseColor("#00382F")
         private val APP_AI_HERO_TEXT = Color.parseColor("#D8F4EA")
         private val APP_AI_SUBTLE_STROKE = Color.parseColor("#D7E2DD")
+        private val APP_WORKSPACE_PANEL = Color.parseColor("#173F37")
+        private val APP_WORKSPACE_PANEL_STROKE = Color.parseColor("#2C6156")
         private val APP_ON_PRIMARY = Color.parseColor("#FFFFFF")
         private val APP_SECONDARY_CONTAINER = Color.parseColor("#CFE3EE")
         private val APP_SECONDARY_TEXT = Color.parseColor("#374953")

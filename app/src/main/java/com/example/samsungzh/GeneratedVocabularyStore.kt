@@ -18,22 +18,58 @@ class GeneratedVocabularyStore(context: Context) {
 
     fun saveEntries(entries: List<GeneratedVocabularyEntry>) {
         file.writeText(GeneratedVocabularyValidator.toJson(entries))
-        val prefs = AiLabPreferences(appContext)
-        prefs.generatedCount = entries.size
-        prefs.lastGenerationMillis = entries.maxOfOrNull { it.createdAtMillis } ?: System.currentTimeMillis()
-        prefs.generatedStatus = AiLabPreferences.GENERATED_READY
+        applyMetadata(metadataFor(entries), preserveStatus = false)
     }
 
     fun clear() {
         if (file.exists()) {
             file.delete()
         }
+        applyMetadata(GeneratedVocabularyMetadata.Empty, preserveStatus = false)
+    }
+
+    fun syncMetadata(preserveStatus: Boolean = false): GeneratedVocabularyMetadata {
+        val metadata = metadataFor(loadEntries())
+        applyMetadata(metadata, preserveStatus)
+        return metadata
+    }
+
+    private fun applyMetadata(metadata: GeneratedVocabularyMetadata, preserveStatus: Boolean) {
         val prefs = AiLabPreferences(appContext)
-        prefs.generatedCount = 0
-        prefs.generatedStatus = AiLabPreferences.GENERATED_EMPTY
+        prefs.generatedCount = metadata.count
+        prefs.lastGenerationMillis = metadata.lastGenerationMillis
+        if (!preserveStatus) {
+            prefs.generatedStatus = if (metadata.hasEntries) {
+                AiLabPreferences.GENERATED_READY
+            } else {
+                AiLabPreferences.GENERATED_EMPTY
+            }
+        }
     }
 
     companion object {
         private const val FILE_NAME = "generated_vocabulary.json"
+
+        fun metadataFor(entries: List<GeneratedVocabularyEntry>): GeneratedVocabularyMetadata =
+            if (entries.isEmpty()) {
+                GeneratedVocabularyMetadata.Empty
+            } else {
+                GeneratedVocabularyMetadata(
+                    count = entries.size,
+                    lastGenerationMillis = entries.maxOf { it.createdAtMillis }.coerceAtLeast(0L),
+                )
+            }
+    }
+}
+
+data class GeneratedVocabularyMetadata(
+    val count: Int,
+    val lastGenerationMillis: Long,
+) {
+    val hasEntries: Boolean
+        get() = count > 0
+
+    companion object {
+        val Empty = GeneratedVocabularyMetadata(count = 0, lastGenerationMillis = 0L)
     }
 }

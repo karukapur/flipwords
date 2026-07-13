@@ -323,6 +323,8 @@ class CoverOverlayService : Service() {
                 DisplayMode.REVEAL_CARD -> "Reveal: ${word.english}"
                 else -> word.english
             },
+            isPrompt = card.displayMode == DisplayMode.MEANING_PROMPT ||
+                card.displayMode == DisplayMode.PINYIN_PROMPT,
         )
     }
 
@@ -349,9 +351,20 @@ class CoverOverlayService : Service() {
 
     private fun applyOverlayTextStyles() {
         val maxTextWidth = overlayView?.context?.let { overlayTextMaxWidth(it) }
+        val isPrompt = lastRenderedPhrase?.isPrompt == true
         overlayView?.findViewById<TextView>(R.id.overlay_hanzi)?.apply {
-            textSize = overlayPreferences.hanziSizeSp.toFloat()
+            textSize = if (isPrompt) {
+                promptTextSizeSp().toFloat()
+            } else {
+                overlayPreferences.hanziSizeSp.toFloat()
+            }
             setTextColor(overlayPreferences.hanziColor)
+            typeface = if (isPrompt) {
+                Typeface.create(SANS_FAMILY, Typeface.BOLD)
+            } else {
+                Typeface.create(SERIF_FAMILY, Typeface.BOLD)
+            }
+            setLineSpacing(0f, if (isPrompt) PROMPT_LINE_SPACING_MULTIPLIER else DEFAULT_LINE_SPACING_MULTIPLIER)
             if (maxTextWidth != null) maxWidth = maxTextWidth
         }
         overlayView?.findViewById<TextView>(R.id.overlay_pinyin)?.apply {
@@ -588,10 +601,17 @@ class CoverOverlayService : Service() {
     private fun overlayTextMaxWidth(context: Context): Int =
         (context.resources.displayMetrics.widthPixels - dp(context, 32)).coerceAtLeast(dp(context, 180))
 
+    private fun promptTextSizeSp(): Int =
+        overlayPreferences.hanziSizeSp.coerceIn(
+            MIN_PROMPT_TEXT_SIZE_SP,
+            MAX_PROMPT_TEXT_SIZE_SP,
+        )
+
     private data class OverlayPhrase(
         val hanzi: String,
         val pinyin: String,
         val english: String,
+        val isPrompt: Boolean,
     ) {
         val pinyinDisplay: String = if (pinyin.isBlank()) "" else "[$pinyin]"
     }
@@ -606,6 +626,10 @@ class CoverOverlayService : Service() {
         private const val OVERLAY_EXIT_DURATION_MS = 140L
         private const val OVERLAY_TAP_DURATION_MS = 80L
         private const val OVERLAY_RELEASE_DURATION_MS = 110L
+        private const val MIN_PROMPT_TEXT_SIZE_SP = 16
+        private const val MAX_PROMPT_TEXT_SIZE_SP = 20
+        private const val PROMPT_LINE_SPACING_MULTIPLIER = 1.08f
+        private const val DEFAULT_LINE_SPACING_MULTIPLIER = 1.0f
         private const val SERIF_FAMILY = "Noto Serif TC"
         private const val SANS_FAMILY = "sans-serif"
 
