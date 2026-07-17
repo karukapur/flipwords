@@ -105,4 +105,45 @@ data class SchedulerDecision(
     val paused: Boolean,
 )
 
-fun WordEntry.stableId(): String = listOf(hanzi, pinyin, english).joinToString(separator = "|")
+internal fun WordProgress.recordGenuineDisplay(
+    nowMillis: Long,
+    minimumSpacingMillis: Long,
+): WordProgress {
+    val previousLastSeen = lastSeenAt
+    val updatedDistinctDays = if (
+        previousLastSeen == null || epochDay(previousLastSeen) != epochDay(nowMillis)
+    ) {
+        distinctDaysSeen + 1
+    } else {
+        distinctDaysSeen
+    }
+    val updatedSpacedReappearances = if (
+        previousLastSeen != null && nowMillis - previousLastSeen >= minimumSpacingMillis
+    ) {
+        spacedReappearances + 1
+    } else {
+        spacedReappearances
+    }
+    return EffectiveExposureCalculator.update(
+        copy(
+            timesDisplayed = timesDisplayed + 1,
+            firstSeenAt = firstSeenAt ?: nowMillis,
+            lastSeenAt = nowMillis,
+            distinctDaysSeen = updatedDistinctDays,
+            spacedReappearances = updatedSpacedReappearances,
+            nextEligibleAt = nowMillis + minimumSpacingMillis,
+        ),
+        nowMillis,
+        minimumSpacingMillis,
+    )
+}
+
+internal fun WordProgress.restoreForExplicitActivation(): WordProgress =
+    if (isHidden || status == WordStatus.HIDDEN) {
+        copy(status = WordStatus.LEARNING, isHidden = false)
+    } else {
+        this
+    }
+
+fun WordEntry.stableId(): String = explicitId?.trim()?.takeIf(String::isNotBlank)
+    ?: listOf(hanzi, pinyin, english).joinToString(separator = "|")

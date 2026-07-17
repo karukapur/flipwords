@@ -5,4 +5,5 @@ data class WordEntry(
     val pinyin: String,
     val english: String,
     val hskLevel: Int? = null,
+    val explicitId: String? = null,
 )

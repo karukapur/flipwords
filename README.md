@@ -20,6 +20,7 @@ Honesty note: the current version estimates familiarity from passive exposure si
 - Text-size, color, and auto-hide controls for the experimental overlay.
 - Offline vocabulary bundled in Kotlin with 500 beginner/intermediate Traditional Chinese words and phrases.
 - An opt-in AI Lab that can download a LiteRT-LM model and generate local vocabulary packs.
+- A custom-vocabulary capture flow that turns an English, pinyin, or Hanzi lookup into a reviewed learning card.
 
 ## Learning Model
 
@@ -110,3 +111,9 @@ FlipWords includes an opt-in local AI Lab for personal testing. It keeps the bui
 - Download behavior: on demand only; the model is not bundled in the APK.
 
 Generated packs are saved only after validation accepts the selected number of entries. If download or generation fails, FlipWords continues using the built-in list.
+
+### Custom vocabulary
+
+From the Learn tab, `Add your own word` accepts a compact English meaning, pinyin spelling, or Chinese term. When the local model is available, FlipWords resolves that input immediately into one Traditional Taiwanese Mandarin card, then lets the user review or edit its Hanzi, tone-marked pinyin, and English before anything is saved.
+
+Confirmed custom cards are stored separately from replaceable AI-generated packs, remain active in every source mode, and participate in the same adaptive scheduler, Learn statistics, cover overlay, and notification as built-in vocabulary. `Add & learn now` starts a full-card learning session immediately; `Add for later` leaves the card new for normal scheduling. Raw meeting input stays app-private and is not included in exported AI failure logs.

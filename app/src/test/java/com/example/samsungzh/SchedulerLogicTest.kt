@@ -170,6 +170,38 @@ class SchedulerLogicTest {
     }
 
     @Test
+    fun genuineFirstDisplayStartsLearningAndAppliesConfiguredSpacing() {
+        val spacing = 45L * SchedulerConfig.MILLIS_PER_MINUTE
+        val wordId = "custom-word:meeting"
+
+        val displayed = WordProgress(wordId).recordGenuineDisplay(now, spacing)
+
+        assertEquals(1, displayed.timesDisplayed)
+        assertEquals(now, displayed.firstSeenAt)
+        assertEquals(now, displayed.lastSeenAt)
+        assertEquals(1, displayed.distinctDaysSeen)
+        assertEquals(WordStatus.LEARNING, displayed.status)
+        assertEquals(now + spacing, displayed.nextEligibleAt)
+    }
+
+    @Test
+    fun explicitlyRestoredHiddenWordCanReenterLearning() {
+        val hidden = WordProgress(
+            wordId = "custom-word:hidden",
+            timesDisplayed = 3,
+            status = WordStatus.HIDDEN,
+            isHidden = true,
+        )
+
+        val displayed = hidden.restoreForExplicitActivation()
+            .recordGenuineDisplay(now, SchedulerConfig.DEFAULT_MINIMUM_SPACING_MILLIS)
+
+        assertEquals(4, displayed.timesDisplayed)
+        assertEquals(WordStatus.LEARNING, displayed.status)
+        assertFalse(displayed.isHidden)
+    }
+
+    @Test
     fun masteredWordsNeedMaintenanceWindow() {
         val mastered = WordProgress(
             wordId = words[1].stableId(),

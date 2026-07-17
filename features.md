@@ -223,6 +223,21 @@ This document describes the current FlipWords feature set. It is meant to be a p
   - `english`
   - plus app-added metadata: `source`, `createdAtMillis`
 
+## Custom Vocabulary Capture
+
+- The Learn tab provides an `Add your own word` launcher without adding another navigation destination.
+- A single free-form field accepts English, pinyin, Traditional Hanzi, or Simplified Hanzi.
+- Resolution runs immediately with the downloaded on-device LiteRT-LM model; nightly generation remains limited to bulk packs.
+- The model produces one compact Traditional Taiwanese Mandarin candidate with Hanzi, tone-marked pinyin, and English.
+- Nothing enters the learning bank until the user reviews the result and confirms it.
+- Generated fields can be edited manually before saving, and invalid or failed results keep the original draft available for retry.
+- `Add & learn now` makes the confirmed entry the current full card and applies normal adaptive spacing after that first display.
+- `Add for later` stores the entry as New without recording an exposure.
+- Custom vocabulary is stored separately in `custom_vocabulary.json`, remains available across bulk-pack replacement, and is included in Android backup/device transfer.
+- Custom entries are active in every source mode and take precedence when the same normalized Hanzi exists in another source.
+- Duplicate built-in/generated entries reuse their existing scheduler identity so learning history is not split.
+- Raw custom input remains app-private and is excluded from AI diagnostic exports.
+
 ## AI Vocabulary Validation
 
 - Generated vocabulary is not activated unless validation accepts the selected target count.

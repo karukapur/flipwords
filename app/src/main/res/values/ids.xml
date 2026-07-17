@@ -3,4 +3,10 @@
     <item name="overlay_hanzi" type="id" />
     <item name="overlay_pinyin" type="id" />
     <item name="overlay_english" type="id" />
+    <item name="custom_vocabulary_launcher" type="id" />
+    <item name="custom_vocabulary_sheet" type="id" />
+    <item name="custom_vocabulary_raw_input" type="id" />
+    <item name="custom_vocabulary_hanzi_input" type="id" />
+    <item name="custom_vocabulary_pinyin_input" type="id" />
+    <item name="custom_vocabulary_english_input" type="id" />
 </resources>

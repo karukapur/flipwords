@@ -10,7 +10,11 @@ class WordRepository(context: Context) {
     private val phoneStateDetector = PhoneStateDetector(appContext)
     private val aiLabPreferences = AiLabPreferences(appContext)
     private val generatedVocabularyStore = GeneratedVocabularyStore(appContext)
+    private val customVocabularyStore = CustomVocabularyStore(appContext)
     private val schedulerPreferences = SchedulerPreferences(appContext)
+
+    private inline fun <T> withSchedulerTransaction(block: () -> T): T =
+        synchronized(SCHEDULER_TRANSACTION_LOCK, block)
 
     fun currentWord(nowMillis: Long = System.currentTimeMillis()): WordEntry =
         schedulerTick(nowMillis).word
@@ -23,21 +27,20 @@ class WordRepository(context: Context) {
         )
     }
 
-    fun advanceWord(nowMillis: Long = System.currentTimeMillis()): WordEntry {
+    fun advanceWord(nowMillis: Long = System.currentTimeMillis()): WordEntry = withSchedulerTransaction {
         recordTap(nowMillis)
         val state = phoneStateDetector.currentState(nowMillis)
-        return schedulerTick(
+        schedulerTick(
             nowMillis = nowMillis,
             phoneLearningState = state,
             forceRotate = true,
         ).word
     }
 
-    fun pinWord(word: WordEntry, nowMillis: Long = System.currentTimeMillis()) {
+    fun pinWord(word: WordEntry, nowMillis: Long = System.currentTimeMillis()) = withSchedulerTransaction {
         val progressById = progressStore.loadProgress().toMutableMap()
         val wordId = word.stableId()
-        val progress = markDisplayed(
-            progress = progressById[wordId] ?: WordProgress(wordId),
+        val progress = (progressById[wordId] ?: WordProgress(wordId)).recordGenuineDisplay(
             nowMillis = nowMillis,
             minimumSpacingMillis = schedulerPreferences.minimumSpacingMillis,
         )
@@ -86,10 +89,77 @@ class WordRepository(context: Context) {
 
     fun activeWords(): List<WordEntry> {
         val generated = generatedVocabularyStore.loadEntries().map { it.toWordEntry() }
+        val custom = customVocabularyStore.loadEntries().map { it.toWordEntry() }
         return ActiveVocabularySelector.select(
             builtIn = Vocabulary.words,
             generated = generated,
+            custom = custom,
             sourceMode = aiLabPreferences.sourceMode,
+        )
+    }
+
+    fun findWordByHanzi(hanzi: String): WordEntry? {
+        val key = normalizedHanziKey(hanzi)
+        if (key.isBlank()) return null
+        return activeWords()
+            .asSequence()
+            .plus(generatedVocabularyStore.loadEntries().asSequence().map(GeneratedVocabularyEntry::toWordEntry))
+            .plus(Vocabulary.words.asSequence())
+            .firstOrNull { normalizedHanziKey(it.hanzi) == key }
+    }
+
+    fun customVocabularyCount(): Int = customVocabularyStore.loadEntries().size
+
+    fun addCustomVocabulary(
+        candidate: ResolvedVocabularyCandidate,
+        activateNow: Boolean,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): AddCustomResult = withSchedulerTransaction {
+        val normalizedCandidate = CustomVocabularyValidator.normalize(candidate)
+        val key = normalizedHanziKey(normalizedCandidate.hanzi)
+        require(key.isNotBlank()) { "Traditional Chinese is required." }
+
+        val existingCustom = customVocabularyStore.loadEntries()
+            .firstOrNull { normalizedHanziKey(it.hanzi) == key }
+        val existingWord = existingCustom?.toWordEntry()
+            ?: activeWords().firstOrNull { normalizedHanziKey(it.hanzi) == key }
+            ?: generatedVocabularyStore.loadEntries()
+                .asSequence()
+                .map(GeneratedVocabularyEntry::toWordEntry)
+                .firstOrNull { normalizedHanziKey(it.hanzi) == key }
+            ?: Vocabulary.words.firstOrNull { normalizedHanziKey(it.hanzi) == key }
+        if (existingWord == null) {
+            val validationError = CustomVocabularyValidator.validationError(normalizedCandidate)
+            require(validationError == null) { validationError.orEmpty() }
+        }
+        val durableId = UUID.randomUUID().toString()
+        val canonicalWord = existingWord ?: WordEntry(
+            hanzi = normalizedCandidate.hanzi,
+            pinyin = normalizedCandidate.pinyin,
+            english = normalizedCandidate.english,
+            hskLevel = null,
+            explicitId = "custom-word:$durableId",
+        )
+        val entry = CustomVocabularyEntry(
+            recordId = existingCustom?.recordId ?: "custom-record:$durableId",
+            schedulerId = existingCustom?.schedulerId ?: canonicalWord.stableId(),
+            hanzi = canonicalWord.hanzi,
+            pinyin = PinyinToneFormatter.format(canonicalWord),
+            english = canonicalWord.english,
+            createdAtMillis = existingCustom?.createdAtMillis ?: nowMillis,
+            updatedAtMillis = nowMillis,
+        )
+
+        // The custom bank is committed before any display session or progress is changed.
+        val persisted = customVocabularyStore.upsert(entry)
+        val word = persisted.entry.toWordEntry()
+        if (activateNow) {
+            activateCustomWord(word, nowMillis)
+        }
+        AddCustomResult(
+            word = word,
+            wasExisting = existingWord != null || persisted.wasExisting,
+            activated = activateNow,
         )
     }
 
@@ -100,7 +170,7 @@ class WordRepository(context: Context) {
 
     fun compactSessions(): List<DisplaySession> = sessionLogger.compactSessions()
 
-    fun hideCurrentWord(nowMillis: Long = System.currentTimeMillis()) {
+    fun hideCurrentWord(nowMillis: Long = System.currentTimeMillis()) = withSchedulerTransaction {
         val current = currentWord(nowMillis)
         val id = current.stableId()
         val progressById = progressStore.loadProgress().toMutableMap()
@@ -112,7 +182,7 @@ class WordRepository(context: Context) {
         schedulerTick(nowMillis = nowMillis, forceRotate = true)
     }
 
-    fun restoreHiddenWords() {
+    fun restoreHiddenWords() = withSchedulerTransaction {
         val updated = progressStore.loadProgress().mapValues { (_, progress) ->
             if (progress.status == WordStatus.HIDDEN || progress.isHidden) {
                 progress.copy(status = WordStatus.LEARNING, isHidden = false)
@@ -123,7 +193,7 @@ class WordRepository(context: Context) {
         progressStore.saveProgress(updated)
     }
 
-    fun resetCurrentWordProgress(nowMillis: Long = System.currentTimeMillis()) {
+    fun resetCurrentWordProgress(nowMillis: Long = System.currentTimeMillis()) = withSchedulerTransaction {
         val current = currentWord(nowMillis)
         val updated = progressStore.loadProgress().toMutableMap()
         updated[current.stableId()] = WordProgress(current.stableId())
@@ -132,13 +202,13 @@ class WordRepository(context: Context) {
         startNewSession(current.stableId(), DisplayMode.FULL_CARD, nowMillis)
     }
 
-    fun recordPhoneEvent(action: String?, nowMillis: Long = System.currentTimeMillis()) {
+    fun recordPhoneEvent(action: String?, nowMillis: Long = System.currentTimeMillis()) = withSchedulerTransaction {
         phoneStateDetector.recordSystemIntent(action, nowMillis)
         val state = phoneStateDetector.currentState(nowMillis)
         schedulerTick(nowMillis, state)
     }
 
-    fun recordFullAppOpen(nowMillis: Long = System.currentTimeMillis()) {
+    fun recordFullAppOpen(nowMillis: Long = System.currentTimeMillis()) = withSchedulerTransaction {
         phoneStateDetector.recordFullAppOpen(nowMillis)
         val session = sessionLogger.activeSession()
         if (session != null) {
@@ -164,6 +234,14 @@ class WordRepository(context: Context) {
         nowMillis: Long,
         phoneLearningState: PhoneLearningState = phoneStateDetector.currentState(nowMillis),
         forceRotate: Boolean = false,
+    ): SchedulerDecision = withSchedulerTransaction {
+        schedulerTickLocked(nowMillis, phoneLearningState, forceRotate)
+    }
+
+    private fun schedulerTickLocked(
+        nowMillis: Long,
+        phoneLearningState: PhoneLearningState,
+        forceRotate: Boolean,
     ): SchedulerDecision {
         val words = activeWords()
         val minimumSpacingMillis = schedulerPreferences.minimumSpacingMillis
@@ -189,8 +267,9 @@ class WordRepository(context: Context) {
         if (decision.rotated || currentId == null || sessionLogger.activeSession() == null) {
             progressById = progressStore.loadProgress().toMutableMap()
             accountActiveSession(nowMillis, phoneLearningState, progressById, endSession = true, minimumSpacingMillis)
-            val displayed = markDisplayed(
-                progress = progressById[decision.word.stableId()] ?: WordProgress(decision.word.stableId()),
+            val displayed = (
+                progressById[decision.word.stableId()] ?: WordProgress(decision.word.stableId())
+            ).recordGenuineDisplay(
                 nowMillis = nowMillis,
                 minimumSpacingMillis = minimumSpacingMillis,
             )
@@ -203,6 +282,30 @@ class WordRepository(context: Context) {
 
         progressStore.saveProgress(progressById)
         return decision
+    }
+
+    private fun activateCustomWord(word: WordEntry, nowMillis: Long) {
+        val state = phoneStateDetector.currentState(nowMillis)
+        val minimumSpacingMillis = schedulerPreferences.minimumSpacingMillis
+        val progressById = progressStore.loadProgress().toMutableMap()
+        accountActiveSession(
+            nowMillis = nowMillis,
+            state = state,
+            progressById = progressById,
+            endSession = true,
+            minimumSpacingMillis = minimumSpacingMillis,
+        )
+
+        val wordId = word.stableId()
+        progressById[wordId] = (progressById[wordId] ?: WordProgress(wordId))
+            .restoreForExplicitActivation()
+            .recordGenuineDisplay(
+            nowMillis = nowMillis,
+            minimumSpacingMillis = minimumSpacingMillis,
+        )
+        progressStore.saveProgress(progressById)
+        progressStore.setCurrent(wordId, DisplayMode.FULL_CARD)
+        startNewSession(wordId, DisplayMode.FULL_CARD, nowMillis)
     }
 
     private fun accountActiveSession(
@@ -236,39 +339,6 @@ class WordRepository(context: Context) {
         }
     }
 
-    private fun markDisplayed(
-        progress: WordProgress,
-        nowMillis: Long,
-        minimumSpacingMillis: Long,
-    ): WordProgress {
-        val previousLastSeen = progress.lastSeenAt
-        val distinctDays = if (previousLastSeen == null || epochDay(previousLastSeen) != epochDay(nowMillis)) {
-            progress.distinctDaysSeen + 1
-        } else {
-            progress.distinctDaysSeen
-        }
-        val spacedReappearances = if (
-            previousLastSeen != null &&
-            nowMillis - previousLastSeen >= minimumSpacingMillis
-        ) {
-            progress.spacedReappearances + 1
-        } else {
-            progress.spacedReappearances
-        }
-        return EffectiveExposureCalculator.update(
-            progress.copy(
-                timesDisplayed = progress.timesDisplayed + 1,
-                firstSeenAt = progress.firstSeenAt ?: nowMillis,
-                lastSeenAt = nowMillis,
-                distinctDaysSeen = distinctDays,
-                spacedReappearances = spacedReappearances,
-                nextEligibleAt = nowMillis + minimumSpacingMillis,
-            ),
-            nowMillis,
-            minimumSpacingMillis,
-        )
-    }
-
     private fun startNewSession(wordId: String, displayMode: DisplayMode, nowMillis: Long) {
         sessionLogger.saveActiveSession(
             ActiveDisplaySession(
@@ -279,6 +349,10 @@ class WordRepository(context: Context) {
                 displayMode = displayMode,
             ),
         )
+    }
+
+    private companion object {
+        val SCHEDULER_TRANSACTION_LOCK = Any()
     }
 }
 
@@ -291,4 +365,10 @@ data class RotationInfo(
 data class OverlayCard(
     val word: WordEntry,
     val displayMode: DisplayMode,
+)
+
+data class AddCustomResult(
+    val word: WordEntry,
+    val wasExisting: Boolean,
+    val activated: Boolean,
 )

@@ -19,6 +19,7 @@ import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.hardware.display.DisplayManager
@@ -27,17 +28,22 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.InputFilter
 import android.text.InputType
 import android.view.MotionEvent
 import android.view.Display
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
@@ -53,6 +59,15 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.widget.doAfterTextChanged
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -60,6 +75,7 @@ import java.util.Locale
 
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
+    private val customVocabularyScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var repository: WordRepository
     private lateinit var overlayPreferences: OverlayPreferences
     private lateinit var schedulerPreferences: SchedulerPreferences
@@ -89,6 +105,8 @@ class MainActivity : Activity() {
     private lateinit var statsDueSoonView: TextView
     private lateinit var progressChartView: VocabularyProgressChartView
     private lateinit var recentProgressView: TextView
+    private lateinit var customVocabularyLauncher: LinearLayout
+    private lateinit var customVocabularyCountView: TextView
     private lateinit var wordOptionsButton: ImageView
     private lateinit var autoHideStatusView: TextView
     private lateinit var autoHideDurationButton: TextView
@@ -129,6 +147,9 @@ class MainActivity : Activity() {
     private var selectedHskFilter: Int? = null
     private var updatingUi = false
     private var aiFailurePromptShowing = false
+    private var customVocabularyResolveJob: Job? = null
+    private var customVocabularySheet: CustomVocabularySheetController? = null
+    private var customVocabularyDraft = ""
     private var lastRenderedHanzi: String? = null
     private var lastRenderedModelReady: Boolean? = null
 
@@ -142,6 +163,11 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        customVocabularyDraft = savedInstanceState
+            ?.getString(STATE_CUSTOM_VOCABULARY_DRAFT)
+            .orEmpty()
+        val restoreCustomVocabularySheet =
+            savedInstanceState?.getBoolean(STATE_CUSTOM_VOCABULARY_SHEET_OPEN, false) == true
         repository = WordRepository(this)
         overlayPreferences = OverlayPreferences(this)
         schedulerPreferences = SchedulerPreferences(this)
@@ -154,6 +180,9 @@ class MainActivity : Activity() {
         buildLayout()
         render()
         maybePromptForAiFailureLog()
+        if (restoreCustomVocabularySheet) {
+            mainScrollView.post { showCustomVocabularyDialog() }
+        }
     }
 
     override fun onResume() {
@@ -167,7 +196,19 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(downloadProgressRunnable)
+        customVocabularyResolveJob?.cancel()
+        customVocabularyScope.cancel()
+        customVocabularySheet?.dismiss()
         super.onDestroy()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_CUSTOM_VOCABULARY_DRAFT, customVocabularyDraft)
+        outState.putBoolean(
+            STATE_CUSTOM_VOCABULARY_SHEET_OPEN,
+            customVocabularySheet != null,
+        )
     }
 
     private fun buildLayout() {
@@ -201,6 +242,7 @@ class MainActivity : Activity() {
 
         learnSection = sectionContainer().apply {
             addView(buildHeroCard(), textLayoutParams())
+            addView(buildCustomVocabularyLauncher(), textLayoutParams(topMargin = 12))
             addView(buildStatsCard(), textLayoutParams(topMargin = 16))
         }
         styleSection = sectionContainer().apply {
@@ -414,6 +456,72 @@ class MainActivity : Activity() {
         return card
     }
 
+    private fun buildCustomVocabularyLauncher(): LinearLayout =
+        LinearLayout(this).apply {
+            customVocabularyLauncher = this
+            id = R.id.custom_vocabulary_launcher
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            minimumHeight = dp(80)
+            background = roundedStrokeBackground(
+                color = APP_SURFACE,
+                radius = 24,
+                strokeColor = APP_AI_SUBTLE_STROKE,
+            )
+            applySoftElevation(this, AI_CARD_ELEVATION_DP)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            addView(
+                iconBadge(
+                    iconRes = R.drawable.ic_add,
+                    iconTint = APP_PRIMARY,
+                    backgroundColor = APP_SUCCESS_SURFACE,
+                    sizeDp = 48,
+                ),
+                LinearLayout.LayoutParams(dp(48), dp(48)),
+            )
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(14), 0, dp(8), 0)
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = getString(R.string.custom_vocabulary_launcher_title)
+                            setTextColor(APP_TEXT_PRIMARY)
+                            textSize = 17f
+                            typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                            includeFontPadding = false
+                        },
+                    )
+                    customVocabularyCountView = TextView(this@MainActivity).apply {
+                        setTextColor(APP_TEXT_SECONDARY)
+                        textSize = 13f
+                        typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
+                        includeFontPadding = true
+                        setPadding(0, dp(4), 0, 0)
+                    }
+                    addView(customVocabularyCountView)
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(
+                ImageView(this@MainActivity).apply {
+                    setImageResource(R.drawable.ic_next)
+                    imageTintList = ColorStateList.valueOf(APP_PRIMARY)
+                    contentDescription = null
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    setPadding(dp(9), dp(9), dp(9), dp(9))
+                },
+                LinearLayout.LayoutParams(dp(48), dp(48)),
+            )
+            attachPressFeedback(this)
+            setOnClickListener {
+                performSelectionHaptic()
+                showCustomVocabularyDialog()
+            }
+        }
+
     private fun buildPreviewCard(): LinearLayout {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -589,9 +697,9 @@ class MainActivity : Activity() {
         }
         card.addView(darkHeroTitleRow("AI Workspace", R.drawable.ic_sparkle))
         aiModelNameView = TextView(this).apply {
-            text = "Gemma"
+            text = "Gemma-4-E2B-it"
             setTextColor(APP_AI_HERO_TEXT)
-            textSize = 16f
+            textSize = 15f
             typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
             includeFontPadding = true
             setLineSpacing(dp(2).toFloat(), 1f)
@@ -897,6 +1005,7 @@ class MainActivity : Activity() {
             "Next ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(info.nextOpportunityMillis))}"
         bucketMetricView.text = "${repository.activeWords().size} words"
         frequencyMetricView.text = info.progress.status.readableLabel()
+        renderCustomVocabularyLauncher()
         renderOverlayActions()
         renderLearnStats()
         updateIntervalControls()
@@ -908,6 +1017,26 @@ class MainActivity : Activity() {
             }\nContext: ${info.phoneLearningState.readableLabel()}"
         displayStatusView.text = displayDebugText()
         renderAiLab()
+    }
+
+    private fun renderCustomVocabularyLauncher() {
+        if (!::customVocabularyCountView.isInitialized) return
+
+        val count = repository.customVocabularyCount()
+        val baseDescription = getString(R.string.custom_vocabulary_launcher_subtitle)
+        customVocabularyCountView.text = if (count == 0) {
+            baseDescription
+        } else {
+            getString(
+                R.string.custom_vocabulary_launcher_subtitle_with_count,
+                baseDescription,
+                resources.getQuantityString(R.plurals.custom_vocabulary_count, count, count),
+            )
+        }
+        customVocabularyLauncher.contentDescription = getString(
+            R.string.custom_vocabulary_launcher_accessibility,
+            customVocabularyCountView.text,
+        )
     }
 
     private fun renderLearnStats() {
@@ -1318,6 +1447,897 @@ class MainActivity : Activity() {
                 render()
             }
             .show()
+    }
+
+    private fun showCustomVocabularyDialog() {
+        customVocabularySheet?.dismiss()
+        customVocabularySheet = CustomVocabularySheetController().also { it.show() }
+    }
+
+    private inner class CustomVocabularySheetController {
+        private val dialog = Dialog(this@MainActivity)
+        private lateinit var capturePanel: LinearLayout
+        private lateinit var loadingPanel: LinearLayout
+        private lateinit var reviewPanel: LinearLayout
+        private lateinit var messagePanel: LinearLayout
+        private lateinit var rawInput: EditText
+        private lateinit var rawCounter: TextView
+        private lateinit var captureError: TextView
+        private lateinit var loadingHeading: TextView
+        private lateinit var loadingBody: TextView
+        private lateinit var loadingCancelButton: TextView
+        private lateinit var reviewHeading: TextView
+        private lateinit var reviewHelp: TextView
+        private lateinit var reviewPreview: LinearLayout
+        private lateinit var reviewHanziPreview: TextView
+        private lateinit var reviewPinyinPreview: TextView
+        private lateinit var reviewEnglishPreview: TextView
+        private lateinit var hanziInput: EditText
+        private lateinit var pinyinInput: EditText
+        private lateinit var englishInput: EditText
+        private lateinit var reviewError: TextView
+        private lateinit var reviewPrimaryButton: TextView
+        private lateinit var reviewLaterButton: TextView
+        private lateinit var messageHeading: TextView
+        private lateinit var messageBody: TextView
+        private lateinit var messagePrimaryButton: TextView
+        private lateinit var messageSecondaryButton: TextView
+        private lateinit var messageTertiaryButton: TextView
+        private lateinit var closeButton: ImageView
+        private var preserveDraftAfterDismiss = false
+        private var updatingReviewFields = false
+        private var manualReview = false
+        private var dismissAllowed = true
+
+        init {
+            dialog.setCanceledOnTouchOutside(false)
+            dialog.setOnKeyListener { _, keyCode, event ->
+                keyCode == KeyEvent.KEYCODE_BACK &&
+                    event.action == KeyEvent.ACTION_UP &&
+                    !dismissAllowed
+            }
+            dialog.setContentView(buildSheetContent())
+            dialog.setOnDismissListener {
+                customVocabularyResolveJob?.cancel()
+                customVocabularyResolveJob = null
+                if (!preserveDraftAfterDismiss) customVocabularyDraft = ""
+                if (customVocabularySheet === this) customVocabularySheet = null
+            }
+        }
+
+        fun show() {
+            dialog.show()
+            dialog.window?.apply {
+                setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                setGravity(Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+                addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                attributes = attributes.apply { dimAmount = 0.42f }
+                setSoftInputMode(
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                        WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE,
+                )
+            }
+            showCapture(requestFocus = true)
+        }
+
+        fun dismiss() {
+            if (dialog.isShowing) dialog.dismiss()
+        }
+
+        private fun buildSheetContent(): View =
+            FrameLayout(this@MainActivity).apply {
+                id = R.id.custom_vocabulary_sheet
+                setPadding(dp(12), dp(20), dp(12), dp(12))
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    accessibilityPaneTitle = getString(R.string.custom_vocabulary_sheet_title)
+                }
+                addView(
+                    ScrollView(this@MainActivity).apply {
+                        isFillViewport = false
+                        overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+                        clipToPadding = false
+                        addView(
+                            LinearLayout(this@MainActivity).apply {
+                                orientation = LinearLayout.VERTICAL
+                                background = roundedBackground(APP_SURFACE, radius = 28)
+                                applySoftElevation(this, NAV_ELEVATION_DP)
+                                setPadding(dp(20), dp(12), dp(20), dp(22))
+                                addView(buildSheetHeader())
+                                capturePanel = buildCapturePanel()
+                                loadingPanel = buildLoadingPanel()
+                                reviewPanel = buildReviewPanel()
+                                messagePanel = buildMessagePanel()
+                                addView(capturePanel, textLayoutParams(topMargin = 20))
+                                addView(loadingPanel, textLayoutParams(topMargin = 20))
+                                addView(reviewPanel, textLayoutParams(topMargin = 20))
+                                addView(messagePanel, textLayoutParams(topMargin = 20))
+                            },
+                            ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ),
+                        )
+                    },
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        Gravity.BOTTOM,
+                    ),
+                )
+            }
+
+        private fun buildSheetHeader(): LinearLayout =
+            LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(
+                    View(this@MainActivity).apply {
+                        background = roundedBackground(APP_OUTLINE_VARIANT, radius = 2)
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    },
+                    LinearLayout.LayoutParams(dp(40), dp(4)).apply {
+                        gravity = Gravity.CENTER_HORIZONTAL
+                    },
+                )
+                addView(
+                    LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(
+                            LinearLayout(this@MainActivity).apply {
+                                orientation = LinearLayout.VERTICAL
+                                addView(
+                                    TextView(this@MainActivity).apply {
+                                        text = getString(R.string.custom_vocabulary_sheet_title)
+                                        setTextColor(APP_TEXT_PRIMARY)
+                                        textSize = 23f
+                                        typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                                        includeFontPadding = false
+                                    },
+                                )
+                                addView(
+                                    TextView(this@MainActivity).apply {
+                                        text = getString(R.string.custom_vocabulary_sheet_subtitle)
+                                        setTextColor(APP_TEXT_SECONDARY)
+                                        textSize = 14f
+                                        includeFontPadding = true
+                                        setLineSpacing(dp(2).toFloat(), 1f)
+                                        setPadding(0, dp(5), 0, 0)
+                                    },
+                                )
+                            },
+                            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+                        )
+                        addView(
+                            iconBadge(
+                                iconRes = R.drawable.ic_close,
+                                iconTint = APP_TEXT_PRIMARY,
+                                backgroundColor = APP_MUTED_SURFACE,
+                                sizeDp = 48,
+                            ).apply {
+                                closeButton = this
+                                contentDescription = getString(R.string.custom_vocabulary_close)
+                                isClickable = true
+                                isFocusable = true
+                                attachPressFeedback(this)
+                                setOnClickListener {
+                                    if (dismissAllowed) {
+                                        performSelectionHaptic()
+                                        dialog.cancel()
+                                    }
+                                }
+                            },
+                            LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+                                marginStart = dp(12)
+                            },
+                        )
+                    },
+                    textLayoutParams(topMargin = 16),
+                )
+            }
+
+        private fun buildCapturePanel(): LinearLayout =
+            statePanel().apply {
+                addView(sheetHeading(getString(R.string.custom_vocabulary_capture_heading)))
+                addView(
+                    sheetBody(getString(R.string.custom_vocabulary_capture_help)),
+                    textLayoutParams(topMargin = 6),
+                )
+                rawInput = sheetInput(
+                    id = R.id.custom_vocabulary_raw_input,
+                    hint = getString(R.string.custom_vocabulary_raw_hint),
+                    maxLength = CUSTOM_VOCABULARY_INPUT_MAX_CHARS,
+                    multiline = true,
+                )
+                addView(
+                    sheetLabel(getString(R.string.custom_vocabulary_raw_label), rawInput.id),
+                    textLayoutParams(topMargin = 18),
+                )
+                addView(rawInput, textLayoutParams(topMargin = 6))
+                rawCounter = TextView(this@MainActivity).apply {
+                    setTextColor(APP_TEXT_SECONDARY)
+                    textSize = 12f
+                    gravity = Gravity.END
+                    includeFontPadding = true
+                }
+                addView(rawCounter, textLayoutParams(topMargin = 4))
+                captureError = sheetStatusText(error = true)
+                addView(captureError, textLayoutParams(topMargin = 8))
+                addView(
+                    actionButton(
+                        getString(R.string.custom_vocabulary_generate),
+                        primary = true,
+                        iconRes = R.drawable.ic_sparkle,
+                    ).apply {
+                        setOnClickListener {
+                            performActionHaptic()
+                            generatePreview()
+                        }
+                    },
+                    textLayoutParams(topMargin = 14),
+                )
+                rawInput.doAfterTextChanged { editable ->
+                    customVocabularyDraft = editable?.toString().orEmpty()
+                    updateRawCounter()
+                    clearCaptureError()
+                }
+                rawInput.setOnEditorActionListener { _, actionId, _ ->
+                    if (actionId == EditorInfo.IME_ACTION_DONE) {
+                        generatePreview()
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+
+        private fun buildLoadingPanel(): LinearLayout =
+            statePanel(centered = true).apply {
+                addView(
+                    ProgressBar(this@MainActivity).apply {
+                        isIndeterminate = true
+                        contentDescription = getString(R.string.custom_vocabulary_generating_body)
+                    },
+                    LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+                        gravity = Gravity.CENTER_HORIZONTAL
+                    },
+                )
+                loadingHeading = sheetHeading(getString(R.string.custom_vocabulary_generating_heading)).apply {
+                    gravity = Gravity.CENTER
+                    isFocusable = true
+                }
+                addView(loadingHeading, textLayoutParams(topMargin = 16))
+                loadingBody = sheetBody(getString(R.string.custom_vocabulary_generating_body)).apply {
+                    gravity = Gravity.CENTER
+                    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                }
+                addView(loadingBody, textLayoutParams(topMargin = 8))
+                loadingCancelButton = actionButton(
+                    getString(R.string.custom_vocabulary_cancel_generation),
+                    primary = false,
+                ).apply {
+                    setOnClickListener {
+                        customVocabularyResolveJob?.cancel()
+                        showCapture(requestFocus = true)
+                    }
+                }
+                addView(loadingCancelButton, textLayoutParams(topMargin = 18))
+            }
+
+        private fun buildReviewPanel(): LinearLayout =
+            statePanel().apply {
+                reviewHeading = sheetHeading(getString(R.string.custom_vocabulary_review_heading)).apply {
+                    isFocusable = true
+                }
+                addView(reviewHeading)
+                reviewHelp = sheetBody(getString(R.string.custom_vocabulary_review_help))
+                addView(reviewHelp, textLayoutParams(topMargin = 6))
+                reviewPreview = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    background = ShimmerCardDrawable(
+                        startColor = APP_HERO_BACKGROUND,
+                        endColor = APP_HERO_DEEP,
+                        shimmerColor = PREVIEW_SHIMMER,
+                        radiusPx = dp(24).toFloat(),
+                    )
+                    setPadding(dp(18), dp(18), dp(18), dp(18))
+                    reviewHanziPreview = TextView(this@MainActivity).apply {
+                        setTextColor(APP_ON_PRIMARY)
+                        textSize = 40f
+                        gravity = Gravity.CENTER
+                        typeface = Typeface.create(SERIF_FAMILY, Typeface.BOLD)
+                        includeFontPadding = false
+                    }
+                    reviewPinyinPreview = TextView(this@MainActivity).apply {
+                        setTextColor(APP_AI_HERO_TEXT)
+                        textSize = 18f
+                        gravity = Gravity.CENTER
+                        includeFontPadding = true
+                        setPadding(0, dp(8), 0, 0)
+                    }
+                    reviewEnglishPreview = TextView(this@MainActivity).apply {
+                        setTextColor(APP_AMBER_SURFACE)
+                        textSize = 18f
+                        gravity = Gravity.CENTER
+                        typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                        includeFontPadding = true
+                        setPadding(0, dp(8), 0, 0)
+                    }
+                    addView(reviewHanziPreview)
+                    addView(reviewPinyinPreview)
+                    addView(reviewEnglishPreview)
+                }
+                addView(reviewPreview, textLayoutParams(topMargin = 16))
+                hanziInput = sheetInput(
+                    id = R.id.custom_vocabulary_hanzi_input,
+                    hint = getString(R.string.custom_vocabulary_hanzi_hint),
+                    maxLength = GeneratedVocabularyValidator.MAX_HANZI_CHARS,
+                )
+                pinyinInput = sheetInput(
+                    id = R.id.custom_vocabulary_pinyin_input,
+                    hint = getString(R.string.custom_vocabulary_pinyin_hint),
+                    maxLength = GeneratedVocabularyValidator.MAX_PINYIN_CHARS,
+                )
+                englishInput = sheetInput(
+                    id = R.id.custom_vocabulary_english_input,
+                    hint = getString(R.string.custom_vocabulary_english_hint),
+                    maxLength = GeneratedVocabularyValidator.MAX_ENGLISH_CHARS,
+                )
+                addView(
+                    sheetLabel(getString(R.string.custom_vocabulary_hanzi_label), hanziInput.id),
+                    textLayoutParams(topMargin = 18),
+                )
+                addView(hanziInput, textLayoutParams(topMargin = 6))
+                addView(
+                    sheetLabel(getString(R.string.custom_vocabulary_pinyin_label), pinyinInput.id),
+                    textLayoutParams(topMargin = 14),
+                )
+                addView(pinyinInput, textLayoutParams(topMargin = 6))
+                addView(
+                    sheetLabel(getString(R.string.custom_vocabulary_english_label), englishInput.id),
+                    textLayoutParams(topMargin = 14),
+                )
+                addView(englishInput, textLayoutParams(topMargin = 6))
+                reviewError = sheetStatusText(error = true)
+                addView(reviewError, textLayoutParams(topMargin = 10))
+                reviewPrimaryButton = actionButton(
+                    getString(R.string.custom_vocabulary_add_now),
+                    primary = true,
+                    iconRes = R.drawable.ic_learn,
+                ).apply {
+                    setOnClickListener { submitCandidate(activateNow = true) }
+                }
+                addView(reviewPrimaryButton, textLayoutParams(topMargin = 16))
+                reviewLaterButton = actionButton(
+                    getString(R.string.custom_vocabulary_add_later),
+                    primary = false,
+                    iconRes = R.drawable.ic_clock,
+                ).apply {
+                    setOnClickListener { submitCandidate(activateNow = false) }
+                }
+                addView(reviewLaterButton, textLayoutParams(topMargin = 10))
+                addView(
+                    actionButton(getString(R.string.custom_vocabulary_change_input), primary = false).apply {
+                        setOnClickListener { showCapture(requestFocus = true) }
+                    },
+                    textLayoutParams(topMargin = 10),
+                )
+                listOf(hanziInput, pinyinInput, englishInput).forEach { input ->
+                    input.doAfterTextChanged {
+                        if (!updatingReviewFields) {
+                            clearReviewError()
+                            refreshReviewPreview()
+                        }
+                    }
+                }
+            }
+
+        private fun buildMessagePanel(): LinearLayout =
+            statePanel(centered = true).apply {
+                messageHeading = sheetHeading("").apply {
+                    gravity = Gravity.CENTER
+                    isFocusable = true
+                }
+                addView(messageHeading)
+                messageBody = sheetBody("").apply {
+                    gravity = Gravity.CENTER
+                    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                }
+                addView(messageBody, textLayoutParams(topMargin = 8))
+                messagePrimaryButton = actionButton("", primary = true)
+                messageSecondaryButton = actionButton("", primary = false)
+                messageTertiaryButton = actionButton("", primary = false)
+                addView(messagePrimaryButton, textLayoutParams(topMargin = 20))
+                addView(messageSecondaryButton, textLayoutParams(topMargin = 10))
+                addView(messageTertiaryButton, textLayoutParams(topMargin = 10))
+            }
+
+        private fun statePanel(centered: Boolean = false): LinearLayout =
+            LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = if (centered) Gravity.CENTER_HORIZONTAL else Gravity.NO_GRAVITY
+                visibility = View.GONE
+            }
+
+        private fun sheetHeading(value: String): TextView =
+            TextView(this@MainActivity).apply {
+                text = value
+                setTextColor(APP_TEXT_PRIMARY)
+                textSize = 20f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                includeFontPadding = false
+            }
+
+        private fun sheetBody(value: String): TextView =
+            TextView(this@MainActivity).apply {
+                text = value
+                setTextColor(APP_TEXT_SECONDARY)
+                textSize = 15f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
+                includeFontPadding = true
+                setLineSpacing(dp(3).toFloat(), 1f)
+            }
+
+        private fun sheetLabel(value: String, inputId: Int): TextView =
+            TextView(this@MainActivity).apply {
+                text = value
+                labelFor = inputId
+                setTextColor(APP_TEXT_PRIMARY)
+                textSize = 14f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                includeFontPadding = false
+            }
+
+        private fun sheetInput(
+            id: Int,
+            hint: String,
+            maxLength: Int,
+            multiline: Boolean = false,
+        ): EditText =
+            EditText(this@MainActivity).apply {
+                this.id = id
+                this.hint = hint
+                setTextColor(APP_TEXT_PRIMARY)
+                setHintTextColor(APP_TEXT_SECONDARY)
+                textSize = 16f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
+                filters = arrayOf(InputFilter.LengthFilter(maxLength))
+                background = sheetInputBackground(error = false)
+                minimumHeight = dp(if (multiline) 88 else 56)
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                gravity = if (multiline) Gravity.TOP or Gravity.START else Gravity.CENTER_VERTICAL
+                inputType = if (multiline) {
+                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                        InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                } else {
+                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                }
+                imeOptions = if (multiline) EditorInfo.IME_ACTION_DONE else EditorInfo.IME_ACTION_NEXT
+                if (multiline) {
+                    minLines = 2
+                    maxLines = 4
+                    isSingleLine = false
+                } else {
+                    maxLines = 2
+                    isSingleLine = false
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+                }
+            }
+
+        private fun sheetStatusText(error: Boolean): TextView =
+            sheetBody("").apply {
+                setTextColor(if (error) APP_ON_ERROR_CONTAINER else APP_TEXT_SECONDARY)
+                accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                visibility = View.GONE
+                if (error) setButtonIcon(this, R.drawable.ic_warning, APP_ERROR)
+            }
+
+        private fun sheetInputBackground(error: Boolean): Drawable =
+            roundedStrokeBackground(
+                color = APP_MUTED_SURFACE,
+                radius = 16,
+                strokeColor = if (error) APP_ERROR else APP_OUTLINE_VARIANT,
+            )
+
+        private fun setActivePanel(panel: View) {
+            listOf(capturePanel, loadingPanel, reviewPanel, messagePanel).forEach {
+                it.visibility = if (it === panel) View.VISIBLE else View.GONE
+            }
+        }
+
+        private fun showCapture(requestFocus: Boolean) {
+            customVocabularyResolveJob?.cancel()
+            customVocabularyResolveJob = null
+            setDismissEnabled(true)
+            setActivePanel(capturePanel)
+            captureError.visibility = View.GONE
+            rawInput.background = sheetInputBackground(error = false)
+            if (rawInput.text.toString() != customVocabularyDraft) {
+                rawInput.setText(customVocabularyDraft)
+                rawInput.setSelection(rawInput.text.length)
+            }
+            updateRawCounter()
+            if (requestFocus) {
+                dialog.window?.setSoftInputMode(
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                        WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE,
+                )
+                rawInput.post {
+                    rawInput.requestFocus()
+                    getSystemService(InputMethodManager::class.java)
+                        ?.showSoftInput(rawInput, InputMethodManager.SHOW_IMPLICIT)
+                }
+            }
+        }
+
+        private fun updateRawCounter() {
+            rawCounter.text = getString(
+                R.string.custom_vocabulary_character_count,
+                rawInput.text?.length ?: 0,
+            )
+        }
+
+        private fun clearCaptureError() {
+            if (!::captureError.isInitialized) return
+            captureError.visibility = View.GONE
+            rawInput.background = sheetInputBackground(error = false)
+        }
+
+        private fun showCaptureError(message: String) {
+            captureError.text = message
+            captureError.visibility = View.VISIBLE
+            rawInput.background = sheetInputBackground(error = true)
+            rawInput.requestFocus()
+            captureError.post { captureError.announceForAccessibility(message) }
+        }
+
+        private fun generatePreview() {
+            val raw = rawInput.text.toString().trim()
+            if (raw.isEmpty() || raw.length > CUSTOM_VOCABULARY_INPUT_MAX_CHARS) {
+                showCaptureError(getString(R.string.custom_vocabulary_input_required))
+                return
+            }
+            customVocabularyDraft = raw
+            hideKeyboard()
+            if (aiModelManager.refreshStatus() != AiLabPreferences.MODEL_READY) {
+                showMissingModel()
+                return
+            }
+
+            showLoading(
+                heading = getString(R.string.custom_vocabulary_generating_heading),
+                body = getString(R.string.custom_vocabulary_generating_body),
+                canCancel = true,
+            )
+            customVocabularyResolveJob?.cancel()
+            customVocabularyResolveJob = customVocabularyScope.launch {
+                try {
+                    val candidate = withContext(Dispatchers.Default) {
+                        LiteRtVocabularyResolver(aiModelManager.modelFile()).resolve(raw)
+                    }
+                    CustomVocabularyValidator.validationError(candidate)?.let { error(it) }
+                    if (dialog.isShowing && customVocabularySheet === this@CustomVocabularySheetController) {
+                        showReview(candidate, isManual = false)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    if (dialog.isShowing && customVocabularySheet === this@CustomVocabularySheetController) {
+                        showResolutionError()
+                    }
+                }
+            }
+        }
+
+        private fun showLoading(heading: String, body: String, canCancel: Boolean) {
+            hideKeyboard()
+            setDismissEnabled(canCancel)
+            setActivePanel(loadingPanel)
+            loadingHeading.text = heading
+            loadingBody.text = body
+            loadingCancelButton.visibility = if (canCancel) View.VISIBLE else View.GONE
+            loadingHeading.post {
+                loadingHeading.requestFocus()
+                loadingBody.announceForAccessibility(body)
+            }
+        }
+
+        private fun showReview(candidate: ResolvedVocabularyCandidate, isManual: Boolean) {
+            hideKeyboard()
+            setDismissEnabled(true)
+            manualReview = isManual
+            updatingReviewFields = true
+            hanziInput.setText(candidate.hanzi)
+            pinyinInput.setText(candidate.pinyin)
+            englishInput.setText(candidate.english)
+            updatingReviewFields = false
+            clearReviewError()
+            refreshReviewPreview()
+            setActivePanel(reviewPanel)
+            reviewHeading.post { reviewHeading.requestFocus() }
+        }
+
+        private fun showManualReview() {
+            val raw = customVocabularyDraft.trim()
+            val looksLikeHanzi = raw.isNotEmpty() &&
+                raw.length <= GeneratedVocabularyValidator.MAX_HANZI_CHARS &&
+                raw.any { it.code in 0x3400..0x9FFF }
+            showReview(
+                ResolvedVocabularyCandidate(
+                    hanzi = if (looksLikeHanzi) raw else "",
+                    pinyin = "",
+                    english = "",
+                ),
+                isManual = true,
+            )
+        }
+
+        private fun refreshReviewPreview() {
+            val candidate = reviewedCandidate()
+            val existing = candidate.hanzi.takeIf { it.isNotBlank() }?.let(repository::findWordByHanzi)
+            val previewHanzi = existing?.hanzi ?: candidate.hanzi
+            val previewPinyin = existing?.let(PinyinToneFormatter::format) ?: candidate.pinyin
+            val previewEnglish = existing?.english ?: candidate.english
+            reviewHanziPreview.text = previewHanzi.ifBlank { "—" }
+            reviewPinyinPreview.text = previewPinyin.ifBlank { "—" }.let { "[$it]" }
+            reviewEnglishPreview.text = previewEnglish.ifBlank { "—" }
+            reviewPreview.contentDescription = getString(
+                R.string.custom_vocabulary_preview_accessibility,
+                previewHanzi.ifBlank { "blank Traditional Chinese" },
+                previewPinyin.ifBlank { "blank pinyin" },
+                previewEnglish.ifBlank { "blank English meaning" },
+            )
+            reviewHelp.text = when {
+                existing != null -> getString(R.string.custom_vocabulary_duplicate_help)
+                manualReview -> getString(
+                    R.string.custom_vocabulary_manual_help,
+                    customVocabularyDraft,
+                )
+                else -> getString(R.string.custom_vocabulary_review_help)
+            }
+            configureActionButton(
+                button = reviewPrimaryButton,
+                text = getString(
+                    if (existing == null) {
+                        R.string.custom_vocabulary_add_now
+                    } else {
+                        R.string.custom_vocabulary_learn_existing
+                    },
+                ),
+                primary = true,
+                iconRes = R.drawable.ic_learn,
+            )
+            reviewLaterButton.visibility = if (existing == null) View.VISIBLE else View.GONE
+        }
+
+        private fun reviewedCandidate(): ResolvedVocabularyCandidate =
+            ResolvedVocabularyCandidate(
+                hanzi = hanziInput.text.toString().trim(),
+                pinyin = pinyinInput.text.toString().trim(),
+                english = englishInput.text.toString().trim(),
+            )
+
+        private fun clearReviewError() {
+            if (!::reviewError.isInitialized) return
+            reviewError.visibility = View.GONE
+            listOf(hanziInput, pinyinInput, englishInput).forEach {
+                it.background = sheetInputBackground(error = false)
+            }
+        }
+
+        private fun showReviewError(message: String, candidate: ResolvedVocabularyCandidate) {
+            reviewError.text = message
+            reviewError.visibility = View.VISIBLE
+            val focusTarget = when {
+                message.contains("Chinese", ignoreCase = true) ||
+                    message.contains("Hanzi", ignoreCase = true) -> hanziInput
+                message.contains("Pinyin", ignoreCase = true) -> pinyinInput
+                else -> englishInput
+            }
+            focusTarget.background = sheetInputBackground(error = true)
+            focusTarget.requestFocus()
+            reviewError.post { reviewError.announceForAccessibility(message) }
+        }
+
+        private fun submitCandidate(activateNow: Boolean) {
+            performActionHaptic()
+            val reviewed = reviewedCandidate()
+            val existing = reviewed.hanzi
+                .takeIf(String::isNotBlank)
+                ?.let(repository::findWordByHanzi)
+            val candidate = existing?.let { word ->
+                ResolvedVocabularyCandidate(
+                    hanzi = word.hanzi,
+                    pinyin = PinyinToneFormatter.format(word),
+                    english = word.english,
+                )
+            } ?: reviewed
+            val validationError = CustomVocabularyValidator.validationError(candidate)
+            if (validationError != null) {
+                showReviewError(validationError, candidate)
+                return
+            }
+
+            showLoading(
+                heading = getString(R.string.custom_vocabulary_saving_heading),
+                body = getString(R.string.custom_vocabulary_saving_body),
+                canCancel = false,
+            )
+            customVocabularyResolveJob?.cancel()
+            customVocabularyResolveJob = customVocabularyScope.launch {
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        repository.addCustomVocabulary(candidate, activateNow)
+                    }
+                    if (!dialog.isShowing || customVocabularySheet !== this@CustomVocabularySheetController) return@launch
+
+                    customVocabularyDraft = ""
+                    refreshOverlay()
+                    render()
+                    performConfirmHaptic()
+                    val wordLabel = "${result.word.hanzi} [${PinyinToneFormatter.format(result.word)}]"
+                    val successMessage = when {
+                        result.wasExisting && result.activated -> getString(
+                            R.string.custom_vocabulary_success_existing,
+                            wordLabel,
+                        )
+                        result.activated -> getString(R.string.custom_vocabulary_success_now, wordLabel)
+                        else -> getString(R.string.custom_vocabulary_success_later, wordLabel)
+                    }
+                    showMessage(
+                        title = getString(R.string.custom_vocabulary_success_title),
+                        body = successMessage,
+                        iconRes = R.drawable.ic_check,
+                        iconTint = APP_SUCCESS,
+                        primaryText = getString(R.string.custom_vocabulary_done),
+                        onPrimary = { dialog.dismiss() },
+                    )
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    if (dialog.isShowing && customVocabularySheet === this@CustomVocabularySheetController) {
+                        showSaveError(candidate, activateNow)
+                    }
+                }
+            }
+        }
+
+        private fun showMissingModel() {
+            showMessage(
+                title = getString(R.string.custom_vocabulary_model_missing_title),
+                body = getString(R.string.custom_vocabulary_model_missing_body),
+                iconRes = R.drawable.ic_download,
+                iconTint = APP_PRIMARY,
+                primaryText = getString(R.string.custom_vocabulary_open_ai_lab),
+                onPrimary = { openAiLabWithDraft() },
+                secondaryText = getString(R.string.custom_vocabulary_enter_manually),
+                onSecondary = { showManualReview() },
+                tertiaryText = getString(R.string.custom_vocabulary_back_to_input),
+                onTertiary = { showCapture(requestFocus = true) },
+            )
+        }
+
+        private fun showResolutionError() {
+            showMessage(
+                title = getString(R.string.custom_vocabulary_resolution_failed_title),
+                body = getString(R.string.custom_vocabulary_resolution_failed_body),
+                iconRes = R.drawable.ic_warning,
+                iconTint = APP_ERROR,
+                primaryText = getString(R.string.custom_vocabulary_retry),
+                onPrimary = {
+                    setActivePanel(capturePanel)
+                    generatePreview()
+                },
+                secondaryText = getString(R.string.custom_vocabulary_enter_manually),
+                onSecondary = { showManualReview() },
+                tertiaryText = getString(R.string.custom_vocabulary_back_to_input),
+                onTertiary = { showCapture(requestFocus = true) },
+            )
+        }
+
+        private fun showSaveError(candidate: ResolvedVocabularyCandidate, activateNow: Boolean) {
+            showMessage(
+                title = getString(R.string.custom_vocabulary_save_failed_title),
+                body = getString(R.string.custom_vocabulary_save_failed_body),
+                iconRes = R.drawable.ic_warning,
+                iconTint = APP_ERROR,
+                primaryText = getString(R.string.custom_vocabulary_retry_save),
+                onPrimary = {
+                    showReview(candidate, manualReview)
+                    submitCandidate(activateNow)
+                },
+                secondaryText = getString(R.string.custom_vocabulary_back_to_review),
+                onSecondary = { showReview(candidate, manualReview) },
+            )
+        }
+
+        private fun showMessage(
+            title: String,
+            body: String,
+            iconRes: Int,
+            iconTint: Int,
+            primaryText: String,
+            onPrimary: () -> Unit,
+            secondaryText: String? = null,
+            onSecondary: (() -> Unit)? = null,
+            tertiaryText: String? = null,
+            onTertiary: (() -> Unit)? = null,
+        ) {
+            hideKeyboard()
+            setDismissEnabled(true)
+            setActivePanel(messagePanel)
+            messageHeading.text = title
+            setButtonIcon(messageHeading, iconRes, iconTint)
+            messageBody.text = body
+            bindMessageButton(messagePrimaryButton, primaryText, onPrimary, primary = true)
+            bindOptionalMessageButton(messageSecondaryButton, secondaryText, onSecondary)
+            bindOptionalMessageButton(messageTertiaryButton, tertiaryText, onTertiary)
+            messageHeading.post {
+                messageHeading.requestFocus()
+                messageBody.announceForAccessibility("$title. $body")
+            }
+        }
+
+        private fun bindMessageButton(
+            button: TextView,
+            text: String,
+            action: () -> Unit,
+            primary: Boolean,
+        ) {
+            button.visibility = View.VISIBLE
+            configureActionButton(button, text, primary)
+            button.setOnClickListener {
+                performSelectionHaptic()
+                action()
+            }
+        }
+
+        private fun bindOptionalMessageButton(
+            button: TextView,
+            text: String?,
+            action: (() -> Unit)?,
+        ) {
+            if (text == null || action == null) {
+                button.visibility = View.GONE
+                button.setOnClickListener(null)
+            } else {
+                bindMessageButton(button, text, action, primary = false)
+            }
+        }
+
+        private fun openAiLabWithDraft() {
+            preserveDraftAfterDismiss = true
+            dialog.dismiss()
+            activeTab = AppTab.AI_LAB
+            updateVisibleSection(animate = true)
+            scrollMainContentToTop(animate = true)
+            render()
+            aiModelActionButton.post {
+                aiModelActionButton.requestFocus()
+                aiModelActionButton.announceForAccessibility(
+                    getString(R.string.custom_vocabulary_ai_lab_focus),
+                )
+            }
+        }
+
+        private fun hideKeyboard() {
+            dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            val focused = dialog.currentFocus ?: rawInput
+            getSystemService(InputMethodManager::class.java)
+                ?.hideSoftInputFromWindow(focused.windowToken, 0)
+            focused.clearFocus()
+        }
+
+        private fun setDismissEnabled(enabled: Boolean) {
+            dismissAllowed = enabled
+            if (::closeButton.isInitialized) {
+                closeButton.isEnabled = enabled
+                closeButton.alpha = if (enabled) 1f else 0.45f
+            }
+        }
     }
 
     private fun showWordOptionsDialog() {
@@ -3502,6 +4522,9 @@ class MainActivity : Activity() {
         private const val PULSE_DURATION_MS = 120L
         private const val RUNNING_PULSE_DURATION_MS = 1_200L
         private const val WORD_STAGGER_MS = 45L
+        private const val CUSTOM_VOCABULARY_INPUT_MAX_CHARS = 120
+        private const val STATE_CUSTOM_VOCABULARY_DRAFT = "custom_vocabulary_draft"
+        private const val STATE_CUSTOM_VOCABULARY_SHEET_OPEN = "custom_vocabulary_sheet_open"
         private const val CARD_ELEVATION_DP = 2
         private const val AI_CARD_ELEVATION_DP = 1
         private const val AI_HERO_ELEVATION_DP = 4

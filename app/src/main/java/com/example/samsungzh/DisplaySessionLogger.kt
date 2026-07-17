@@ -4,7 +4,6 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 
 class DisplaySessionLogger(context: Context) {
@@ -186,7 +185,7 @@ fun displaySessionFromJson(json: JSONObject): DisplaySession =
     )
 
 fun epochDay(millis: Long, zoneId: ZoneId = ZoneId.systemDefault()): Long =
-    LocalDate.ofInstant(Instant.ofEpochMilli(millis), zoneId).toEpochDay()
+    Instant.ofEpochMilli(millis).atZone(zoneId).toLocalDate().toEpochDay()
 
 inline fun <reified T : Enum<T>> enumValueOrDefault(name: String?, default: T): T =
     runCatching { enumValueOf<T>(name.orEmpty()) }.getOrDefault(default)

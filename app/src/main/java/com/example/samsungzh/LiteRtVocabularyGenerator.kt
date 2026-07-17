@@ -1,101 +1,29 @@
 package com.example.samsungzh
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.Collections
 
-class LiteRtVocabularyGenerator {
+class LiteRtVocabularyGenerator internal constructor(
+    private val promptExecutor: LiteRtPromptExecutor,
+) {
+    constructor() : this(ReflectiveLiteRtPromptExecutor)
+
     suspend fun generate(
         modelFile: File,
         hskLevel: AiHskLevel = AiHskLevel.HSK_2,
         targetCount: Int = AiLabPreferences.DEFAULT_GENERATION_TARGET_COUNT,
     ): String = withContext(Dispatchers.Default) {
-        runCatching { generateWithBackend(modelFile, hskLevel, targetCount, backendName = "GPU") }
-            .getOrElse { generateWithBackend(modelFile, hskLevel, targetCount, backendName = "CPU") }
-    }
-
-    private fun generateWithBackend(
-        modelFile: File,
-        hskLevel: AiHskLevel,
-        targetCount: Int,
-        backendName: String,
-    ): String {
-        val packageName = "com.google.ai.edge.litertlm"
-        val backendClass = Class.forName("$packageName.Backend")
-        val backend = createBackend(packageName, backendName)
-        val engineConfig = createEngineConfig(packageName, backendClass, modelFile, backend)
-        val engine = Class.forName("$packageName.Engine")
-            .getConstructor(Class.forName("$packageName.EngineConfig"))
-            .newInstance(engineConfig)
-
-        return try {
-            engine.javaClass.getMethod("initialize").invoke(engine)
-            val conversationConfig = Class.forName("$packageName.ConversationConfig")
-                .getConstructor()
-                .newInstance()
-            val conversation = engine.javaClass
-                .getMethod("createConversation", conversationConfig.javaClass)
-                .invoke(engine, conversationConfig)
-                ?: error("LiteRT-LM did not create a conversation.")
-
-            try {
-                val message = conversation.javaClass
-                    .getMethod("sendMessage", String::class.java, Map::class.java)
-                    .invoke(
-                        conversation,
-                        promptWithSystemInstruction(hskLevel, targetCount),
-                        Collections.emptyMap<String, Any>(),
-                    )
-                message?.toString().orEmpty()
-            } finally {
-                conversation.closeIfPossible()
-            }
-        } finally {
-            engine.closeIfPossible()
-        }
-    }
-
-    private fun createBackend(packageName: String, backendName: String): Any =
-        if (backendName == "GPU") {
-            Class.forName("$packageName.Backend\$GPU")
-                .getConstructor()
-                .newInstance()
-        } else {
-            Class.forName("$packageName.Backend\$CPU")
-                .getConstructor(Int::class.javaObjectType, Int::class.javaObjectType)
-                .newInstance(null, null)
-        }
-
-    private fun createEngineConfig(
-        packageName: String,
-        backendClass: Class<*>,
-        modelFile: File,
-        backend: Any,
-    ): Any =
-        Class.forName("$packageName.EngineConfig")
-            .getConstructor(
-                String::class.java,
-                backendClass,
-                backendClass,
-                backendClass,
-                Int::class.javaObjectType,
-                Int::class.javaObjectType,
-                String::class.java,
+        LiteRtInferenceCoordinator.runSerialized {
+            currentCoroutineContext().ensureActive()
+            val output = promptExecutor.executeWithGpuFallback(
+                modelFile = modelFile,
+                prompt = promptWithSystemInstruction(hskLevel, targetCount),
             )
-            .newInstance(
-                modelFile.absolutePath,
-                backend,
-                null,
-                null,
-                null,
-                null,
-                modelFile.parentFile?.absolutePath,
-            )
-
-    private fun Any.closeIfPossible() {
-        if (this is AutoCloseable) {
-            close()
+            currentCoroutineContext().ensureActive()
+            output
         }
     }
 

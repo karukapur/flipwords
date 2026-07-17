@@ -6,4 +6,10 @@
     <include
         domain="file"
         path="generated_vocabulary.json" />
+    <include
+        domain="file"
+        path="custom_vocabulary.json" />
+    <include
+        domain="file"
+        path="custom_vocabulary.json.bak" />
 </full-backup-content>

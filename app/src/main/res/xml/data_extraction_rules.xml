@@ -7,6 +7,12 @@
         <include
             domain="file"
             path="generated_vocabulary.json" />
+        <include
+            domain="file"
+            path="custom_vocabulary.json" />
+        <include
+            domain="file"
+            path="custom_vocabulary.json.bak" />
     </cloud-backup>
 
     <device-transfer>
@@ -16,5 +22,11 @@
         <include
             domain="file"
             path="generated_vocabulary.json" />
+        <include
+            domain="file"
+            path="custom_vocabulary.json" />
+        <include
+            domain="file"
+            path="custom_vocabulary.json.bak" />
     </device-transfer>
 </data-extraction-rules>

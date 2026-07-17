@@ -6,4 +6,64 @@
     <string name="overlay_start">Start overlay</string>
     <string name="overlay_stop">Stop overlay</string>
     <string name="overlay_permission">Grant overlay permission</string>
+
+    <string name="custom_vocabulary_launcher_title">Add your own word</string>
+    <string name="custom_vocabulary_launcher_subtitle">English, pinyin, or Han characters</string>
+    <string name="custom_vocabulary_launcher_subtitle_with_count">%1$s · %2$s</string>
+    <string name="custom_vocabulary_launcher_accessibility">Add your own word. %1$s</string>
+    <plurals name="custom_vocabulary_count">
+        <item quantity="one">%d custom word</item>
+        <item quantity="other">%d custom words</item>
+    </plurals>
+
+    <string name="custom_vocabulary_sheet_title">Add your own word</string>
+    <string name="custom_vocabulary_sheet_subtitle">Create one Taiwanese Mandarin learning card on this device.</string>
+    <string name="custom_vocabulary_close">Close custom word sheet</string>
+    <string name="custom_vocabulary_capture_heading">What word do you want to learn?</string>
+    <string name="custom_vocabulary_capture_help">Enter English, pinyin, Traditional Chinese, or Simplified Chinese.</string>
+    <string name="custom_vocabulary_raw_label">Word or meaning</string>
+    <string name="custom_vocabulary_raw_hint">捷運 / jié yùn / subway</string>
+    <string name="custom_vocabulary_character_count">%1$d of 120 characters</string>
+    <string name="custom_vocabulary_input_required">Enter a word or meaning before generating a preview.</string>
+    <string name="custom_vocabulary_generate">Generate preview</string>
+    <string name="custom_vocabulary_generating_heading">Creating your entry</string>
+    <string name="custom_vocabulary_generating_body">Creating your entry on this device…</string>
+    <string name="custom_vocabulary_saving_heading">Saving your word</string>
+    <string name="custom_vocabulary_saving_body">Adding the reviewed card to your learning bank…</string>
+    <string name="custom_vocabulary_cancel_generation">Cancel generation</string>
+
+    <string name="custom_vocabulary_review_heading">Review your learning card</string>
+    <string name="custom_vocabulary_review_help">Edit any field before adding this card.</string>
+    <string name="custom_vocabulary_manual_help">Complete all three fields. Your original input was “%1$s”.</string>
+    <string name="custom_vocabulary_duplicate_help">This Hanzi is already in your active bank. Learning it now will keep its existing progress and avoid a duplicate.</string>
+    <string name="custom_vocabulary_hanzi_label">Traditional Chinese</string>
+    <string name="custom_vocabulary_hanzi_hint">捷運</string>
+    <string name="custom_vocabulary_pinyin_label">Pinyin with tone marks</string>
+    <string name="custom_vocabulary_pinyin_hint">jié yùn</string>
+    <string name="custom_vocabulary_english_label">English meaning</string>
+    <string name="custom_vocabulary_english_hint">MRT; metro</string>
+    <string name="custom_vocabulary_preview_accessibility">Preview: %1$s, %2$s, %3$s</string>
+    <string name="custom_vocabulary_add_now">Add &amp; learn now</string>
+    <string name="custom_vocabulary_learn_existing">Learn this now</string>
+    <string name="custom_vocabulary_add_later">Add for later</string>
+    <string name="custom_vocabulary_change_input">Change original input</string>
+
+    <string name="custom_vocabulary_model_missing_title">AI model needed</string>
+    <string name="custom_vocabulary_model_missing_body">Download the on-device model in AI Lab, or enter the three card fields manually.</string>
+    <string name="custom_vocabulary_open_ai_lab">Open AI Lab</string>
+    <string name="custom_vocabulary_ai_lab_focus">AI Lab opened. Download the model, then return to Learn. Your draft is retained in this app session.</string>
+    <string name="custom_vocabulary_resolution_failed_title">Couldn’t create a preview</string>
+    <string name="custom_vocabulary_resolution_failed_body">Your input is still here. Retry on-device generation or enter the three card fields manually.</string>
+    <string name="custom_vocabulary_retry">Retry</string>
+    <string name="custom_vocabulary_enter_manually">Enter manually</string>
+    <string name="custom_vocabulary_back_to_input">Back to input</string>
+    <string name="custom_vocabulary_save_failed_title">Couldn’t save this word</string>
+    <string name="custom_vocabulary_save_failed_body">Nothing in your learning session changed. Retry saving or return to the reviewed card.</string>
+    <string name="custom_vocabulary_retry_save">Retry save</string>
+    <string name="custom_vocabulary_back_to_review">Back to review</string>
+    <string name="custom_vocabulary_success_title">Word added</string>
+    <string name="custom_vocabulary_success_now">%1$s is now your current full learning card.</string>
+    <string name="custom_vocabulary_success_later">%1$s was added to the normal new-word queue.</string>
+    <string name="custom_vocabulary_success_existing">%1$s was already in your bank. Its existing progress was kept, and it is now your current card.</string>
+    <string name="custom_vocabulary_done">Done</string>
 </resources>

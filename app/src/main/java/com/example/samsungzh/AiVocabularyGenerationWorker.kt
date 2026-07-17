@@ -13,6 +13,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.CancellationException
 
 class AiVocabularyGenerationWorker(
     appContext: Context,
@@ -64,7 +65,10 @@ class AiVocabularyGenerationWorker(
             refreshOverlayIfNeeded()
             notifyComplete("Generated ${entries.size} entries")
             Result.success()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Throwable) {
+            error.throwIfFatal()
             prefs.generatedStatus =
                 "${AiLabPreferences.GENERATED_FAILED}: ${error.message ?: error::class.java.simpleName}"
             AiDebugLogDumper.recordFailure(
