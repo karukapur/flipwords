@@ -93,6 +93,16 @@ class CustomVocabularyResolverTest {
     }
 
     @Test
+    fun knownVocabularyResolverAcceptsMixedPinyinAndEnglishLookup() {
+        val candidate = KnownVocabularyResolver.resolve(
+            "Yan su ji meaning popcorn chicken",
+            Vocabulary.words.asSequence(),
+        )
+
+        assertEquals(ResolvedVocabularyCandidate("鹽酥雞", "yán sū jī", "popcorn chicken"), candidate)
+    }
+
+    @Test
     fun invalidFirstResponseGetsOneCorrectiveRetry() = runBlocking {
         val outputs = ArrayDeque(listOf("invalid", validJson))
         val prompts = mutableListOf<String>()

@@ -20,21 +20,22 @@ class LiteRtVocabularyGenerator internal constructor(
             currentCoroutineContext().ensureActive()
             val output = promptExecutor.executeWithGpuFallback(
                 modelFile = modelFile,
-                prompt = promptWithSystemInstruction(hskLevel, targetCount),
+                prompt = promptFor(hskLevel, targetCount),
             )
             currentCoroutineContext().ensureActive()
             output
         }
     }
 
-    private fun promptWithSystemInstruction(hskLevel: AiHskLevel, targetCount: Int): String {
-        val normalizedTarget = targetCount.coerceIn(
-            AiLabPreferences.MIN_GENERATION_TARGET_COUNT,
-            AiLabPreferences.MAX_GENERATION_TARGET_COUNT,
-        )
-        val candidateCount = (normalizedTarget + maxOf(20, normalizedTarget / 2))
-            .coerceAtMost(AiLabPreferences.MAX_GENERATION_TARGET_COUNT + 60)
-        return """
+    companion object {
+        internal fun promptFor(hskLevel: AiHskLevel, targetCount: Int): String {
+            val normalizedTarget = targetCount.coerceIn(
+                AiLabPreferences.MIN_GENERATION_TARGET_COUNT,
+                AiLabPreferences.MAX_GENERATION_TARGET_COUNT,
+            )
+            val candidateCount = (normalizedTarget + maxOf(20, normalizedTarget / 2))
+                .coerceAtMost(AiLabPreferences.MAX_GENERATION_TARGET_COUNT + 60)
+            return """
 $SYSTEM_INSTRUCTION
 
 Target level: ${hskLevel.promptDescription}.
@@ -42,9 +43,8 @@ The app needs $normalizedTarget valid saved entries. Generate $candidateCount ca
 
 $PROMPT
 """.trimIndent()
-    }
+        }
 
-    companion object {
         private const val SYSTEM_INSTRUCTION =
             "You generate compact Traditional Taiwanese Mandarin vocabulary for a phone cover screen."
 

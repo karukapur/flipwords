@@ -19,6 +19,14 @@ class VocabularyTest {
     }
 
     @Test
+    fun vocabularyIncludesTaiwanesePopcornChicken() {
+        val word = Vocabulary.words.first { it.hanzi == "鹽酥雞" }
+
+        assertEquals("popcorn chicken", word.english)
+        assertEquals("yán sū jī", PinyinToneFormatter.format(word))
+    }
+
+    @Test
     fun vocabularyUsesTraditionalCharacters() {
         val simplifiedCharacters = setOf(
             '谢', '学', '习', '欢', '为', '时', '间', '师', '东',

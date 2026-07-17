@@ -108,6 +108,15 @@ class WordRepository(context: Context) {
             .firstOrNull { normalizedHanziKey(it.hanzi) == key }
     }
 
+    fun resolveKnownVocabulary(rawInput: String): ResolvedVocabularyCandidate? =
+        KnownVocabularyResolver.resolve(
+            rawInput,
+            activeWords()
+                .asSequence()
+                .plus(generatedVocabularyStore.loadEntries().asSequence().map(GeneratedVocabularyEntry::toWordEntry))
+                .plus(Vocabulary.words.asSequence()),
+        )
+
     fun customVocabularyCount(): Int = customVocabularyStore.loadEntries().size
 
     fun addCustomVocabulary(

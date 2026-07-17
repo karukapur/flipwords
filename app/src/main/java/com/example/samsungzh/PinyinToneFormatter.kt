@@ -88,14 +88,14 @@ object PinyinToneFormatter {
         "遊|you" to "yóu", "運|yun" to "yùn", "道|dao" to "dào", "遠|yuan" to "yuǎn",
         "邊|bian" to "biān", "郵|you" to "yóu", "鄰|lin" to "lín", "醫|yi" to "yī",
         "重|zhong" to "zhòng", "銀|yin" to "yín", "錢|qian" to "qián", "錯|cuo" to "cuò",
-        "鍋|guo" to "guō", "鏡|jing" to "jìng", "鐵|tie" to "tiě", "鑰|yao" to "yào",
+        "酥|su" to "sū", "鍋|guo" to "guō", "鏡|jing" to "jìng", "鐵|tie" to "tiě", "鑰|yao" to "yào",
         "開|kai" to "kāi", "間|jian" to "jiān", "闆|ban" to "bǎn", "關|guan" to "guān",
         "附|fu" to "fù", "院|yuan" to "yuàn", "隊|dui" to "duì", "雞|ji" to "jī",
         "難|nan" to "nán", "雨|yu" to "yǔ", "電|dian" to "diàn", "需|xu" to "xū",
         "青|qing" to "qīng", "靜|jing" to "jìng", "面|mian" to "miàn", "鞋|xie" to "xié",
         "音|yin" to "yīn", "題|ti" to "tí", "飯|fan" to "fàn", "飲|yin" to "yǐn",
         "餃|jiao" to "jiǎo", "餅|bing" to "bǐng", "餐|can" to "cān", "館|guan" to "guǎn",
-        "驗|yan" to "yàn", "高|gao" to "gāo", "麵|mian" to "miàn", "麻|ma" to "má",
+        "鹽|yan" to "yán", "驗|yan" to "yàn", "高|gao" to "gāo", "麵|mian" to "miàn", "麻|ma" to "má",
         "麼|me" to "me", "點|dian" to "diǎn"
     )
 

@@ -232,6 +232,7 @@ object Vocabulary {
         term("牛肉麵", "niu rou mian", "beef noodle soup"),
         term("滷肉飯", "lu rou fan", "braised pork rice"),
         term("雞排", "ji pai", "fried chicken cutlet"),
+        term("鹽酥雞", "yan su ji", "popcorn chicken"),
         term("鍋貼", "guo tie", "potstickers"),
         term("水餃", "shui jiao", "dumplings"),
         term("麵", "mian", "noodles"),

@@ -260,6 +260,7 @@ class MainActivity : Activity() {
         }
         deviceSection = sectionContainer().apply {
             addView(buildStatusCard(), textLayoutParams())
+            addView(buildPromptReviewCard(), textLayoutParams(topMargin = 16))
         }
 
         contentRoot.addView(buildTopAppBar(), textLayoutParams())
@@ -976,6 +977,38 @@ class MainActivity : Activity() {
                 }
             },
             textLayoutParams(topMargin = 14),
+        )
+        return card
+    }
+
+    private fun buildPromptReviewCard(): LinearLayout {
+        val card = appCard()
+        card.addView(
+            appSectionHeader(
+                title = "AI prompt review",
+                subtitle = "Read-only generation details",
+                iconRes = R.drawable.ic_sparkle,
+            ),
+        )
+        card.addView(
+            TextView(this).apply {
+                text = "Review the prompts sent to the on-device model. Your current phrase-pack settings are reflected automatically."
+                setTextColor(APP_TEXT_SECONDARY)
+                textSize = 14f
+                typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
+                includeFontPadding = true
+                setLineSpacing(dp(2).toFloat(), 1f)
+            },
+            textLayoutParams(topMargin = 16),
+        )
+        card.addView(
+            actionButton("Review AI prompts", primary = false, iconRes = R.drawable.ic_sparkle).apply {
+                setOnClickListener {
+                    performSelectionHaptic()
+                    showPromptReviewDialog()
+                }
+            },
+            textLayoutParams(topMargin = 16),
         )
         return card
     }
@@ -2002,6 +2035,10 @@ class MainActivity : Activity() {
             }
             customVocabularyDraft = raw
             hideKeyboard()
+            repository.resolveKnownVocabulary(raw)?.let { candidate ->
+                showReview(candidate, isManual = false)
+                return
+            }
             if (aiModelManager.refreshStatus() != AiLabPreferences.MODEL_READY) {
                 showMissingModel()
                 return
@@ -2503,6 +2540,83 @@ class MainActivity : Activity() {
             .setPositiveButton(positiveText) { _, _ -> onConfirm() }
             .show()
         dialog.getButton(Dialog.BUTTON_POSITIVE)?.setTextColor(if (destructive) APP_ERROR else APP_PRIMARY)
+    }
+
+    private fun showPromptReviewDialog() {
+        val sections = AiPromptReview.sections(
+            hskLevel = aiLabPreferences.hskLevel,
+            targetCount = aiLabPreferences.generationTargetCount,
+        )
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            sections.forEachIndexed { index, section ->
+                if (index > 0) {
+                    addView(
+                        View(this@MainActivity).apply {
+                            setBackgroundColor(APP_OUTLINE_VARIANT)
+                        },
+                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                            topMargin = dp(24)
+                            bottomMargin = dp(24)
+                        },
+                    )
+                }
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = section.title
+                        setTextColor(APP_TEXT_PRIMARY)
+                        textSize = 17f
+                        typeface = Typeface.create(SANS_FAMILY, Typeface.BOLD)
+                        includeFontPadding = false
+                    },
+                )
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = section.description
+                        setTextColor(APP_TEXT_SECONDARY)
+                        textSize = 13f
+                        typeface = Typeface.create(SANS_FAMILY, Typeface.NORMAL)
+                        includeFontPadding = true
+                    },
+                    textLayoutParams(topMargin = 6),
+                )
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = section.prompt
+                        setTextColor(APP_TEXT_PRIMARY)
+                        textSize = 12f
+                        typeface = Typeface.MONOSPACE
+                        includeFontPadding = true
+                        setTextIsSelectable(true)
+                        setLineSpacing(dp(2).toFloat(), 1f)
+                        background = roundedStrokeBackground(
+                            APP_MUTED_SURFACE,
+                            radius = 14,
+                            strokeColor = APP_AI_SUBTLE_STROKE,
+                        )
+                        setPadding(dp(14), dp(12), dp(14), dp(12))
+                    },
+                    textLayoutParams(topMargin = 10),
+                )
+            }
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(
+                content,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("AI prompts")
+            .setMessage("These prompts are read-only. Phrase-pack values match your current AI Lab settings.")
+            .setView(scroll, dp(24), dp(4), dp(24), 0)
+            .setPositiveButton("Done", null)
+            .show()
     }
 
     private fun showGenerationTimePicker() {

@@ -135,6 +135,8 @@ This document describes the current FlipWords feature set. It is meant to be a p
 
 - Device tab shows overlay permission, rotation, display, and cover-display debug status.
 - Device tab includes `Copy diagnostics` for quickly sharing the current debug text.
+- Device tab includes a read-only AI prompt review for the active phrase-pack prompt and the custom phrase lookup and retry templates.
+- Prompt review reflects the currently selected HSK level and generated pack size without offering editing controls.
 
 ## Text Size Controls
 
